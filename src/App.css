@@ -1,7 +1,7 @@
 .shell {
   min-height: 100svh;
   display: grid;
-  grid-template-columns: minmax(10.5rem, 14rem) minmax(0, 1fr);
+  grid-template-columns: minmax(16rem, 21rem) minmax(0, 1fr);
 }
 
 .panel {
@@ -9,6 +9,9 @@
   flex-direction: column;
   gap: 0.7rem;
   padding: 1rem 0.85rem 1.2rem;
+  min-height: 100svh;
+  max-height: 100svh;
+  overflow-y: auto;
   background:
     radial-gradient(circle at top left, rgba(230, 183, 94, 0.35), transparent 36%),
     linear-gradient(180deg, rgba(250, 244, 226, 0.98), rgba(242, 236, 217, 0.96));
@@ -34,13 +37,13 @@
 }
 
 .panel h1 {
-  font-size: clamp(1.15rem, 1.5vw, 1.65rem);
+  font-size: clamp(1.24rem, 1.45vw, 1.72rem);
   line-height: 1.08;
 }
 
 .lede {
   margin: 0;
-  font-size: 0.74rem;
+  font-size: 0.8rem;
   line-height: 1.35;
 }
 
@@ -52,7 +55,7 @@
 .notes li,
 .status,
 .map-caption {
-  font-size: 0.78rem;
+  font-size: 0.82rem;
 }
 
 .lede,
@@ -103,7 +106,7 @@
 }
 
 .panel label span {
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   font-weight: 700;
   color: var(--ink-strong);
 }
@@ -315,6 +318,12 @@
   .map-stage {
     min-height: auto;
     padding-top: 0;
+  }
+
+  .panel {
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
   }
 
   .map-header {

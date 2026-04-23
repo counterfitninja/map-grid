@@ -124,6 +124,24 @@ class BritishGridOverlay extends L.Layer {
     minNorthing: number,
     maxNorthing: number,
   ) {
+    if (map.getZoom() <= 11) {
+      const startPoint = map.latLngToLayerPoint(
+        britishGridToLatLng({ easting, northing: minNorthing }),
+      )
+      const endPoint = map.latLngToLayerPoint(
+        britishGridToLatLng({ easting, northing: maxNorthing }),
+      )
+
+      if (
+        Number.isFinite(startPoint.x) &&
+        Number.isFinite(startPoint.y) &&
+        Number.isFinite(endPoint.x) &&
+        Number.isFinite(endPoint.y)
+      ) {
+        return [startPoint, endPoint]
+      }
+    }
+
     const points: L.Point[] = []
     const sampleStep = Math.max(250, Math.floor(this.spacing / 2))
 
@@ -154,6 +172,24 @@ class BritishGridOverlay extends L.Layer {
     minEasting: number,
     maxEasting: number,
   ) {
+    if (map.getZoom() <= 11) {
+      const startPoint = map.latLngToLayerPoint(
+        britishGridToLatLng({ easting: minEasting, northing }),
+      )
+      const endPoint = map.latLngToLayerPoint(
+        britishGridToLatLng({ easting: maxEasting, northing }),
+      )
+
+      if (
+        Number.isFinite(startPoint.x) &&
+        Number.isFinite(startPoint.y) &&
+        Number.isFinite(endPoint.x) &&
+        Number.isFinite(endPoint.y)
+      ) {
+        return [startPoint, endPoint]
+      }
+    }
+
     const points: L.Point[] = []
     const sampleStep = Math.max(250, Math.floor(this.spacing / 2))
 
