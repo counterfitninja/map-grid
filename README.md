@@ -36,7 +36,11 @@ Start the production server locally:
 npm start
 ```
 
-The production server uses [server.mjs](server.mjs) and listens on `process.env.PORT` with a fallback of `3000`.
+The production server uses [server.mjs](server.mjs) and listens using this order:
+
+- `PORT` (host-injected, if set)
+- `START_PORT` (manual fallback)
+- `4173` (default fallback)
 
 ## Pelican Deployment
 
@@ -75,6 +79,7 @@ The custom egg does this automatically:
 ### Port Handling
 
 The host decides the actual port. Pelican should inject `PORT`, and [server.mjs](server.mjs) binds to that port automatically.
+If `PORT` is not set in your environment, set `START_PORT` to the port you want (for example `4173`).
 
 ## Stack
 

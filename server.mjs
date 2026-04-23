@@ -1,7 +1,9 @@
 import http from 'node:http'
 import handler from 'serve-handler'
 
-const port = Number.parseInt(process.env.PORT ?? '3000', 10)
+const preferredPort = Number.parseInt(process.env.PORT ?? '', 10)
+const fallbackPort = Number.parseInt(process.env.START_PORT ?? '4173', 10)
+const port = Number.isFinite(preferredPort) ? preferredPort : fallbackPort
 
 const server = http.createServer((request, response) => {
   handler(request, response, {
