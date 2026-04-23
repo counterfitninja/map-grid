@@ -41,6 +41,12 @@ The production server uses [server.mjs](server.mjs) and listens using this order
 - `PORT` (host-injected, if set)
 - `START_PORT` (manual fallback)
 - `4173` (default fallback)
+- `HOST` (bind address, defaults to `0.0.0.0`)
+
+Host binding examples:
+
+- `HOST=0.0.0.0` listens on all interfaces.
+- `HOST=127.0.0.1` listens on localhost only.
 
 ## Pelican Deployment
 
@@ -80,6 +86,12 @@ The custom egg does this automatically:
 
 The host decides the actual port. Pelican should inject `PORT`, and [server.mjs](server.mjs) binds to that port automatically.
 If `PORT` is not set in your environment, set `START_PORT` to the port you want (for example `4173`).
+
+For access from outside your private network, host binding alone is not enough. You also need:
+
+1. Firewall rule allowing inbound traffic on the chosen port.
+2. Router/NAT port forwarding to the server if it is behind a home router.
+3. Public DNS or IP routing to the server (or a reverse proxy/tunnel).
 
 ## Stack
 
