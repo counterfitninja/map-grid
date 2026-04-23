@@ -157,6 +157,22 @@
   background: rgba(211, 177, 107, 0.42);
 }
 
+.chip:disabled,
+.chip--secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
+.chip--secondary {
+  justify-self: start;
+  background: rgba(31, 77, 64, 0.1);
+}
+
+.grid-ref--compact {
+  font-size: clamp(0.82rem, 1.1vw, 1rem);
+}
+
 .notes ul {
   margin: 0;
   padding-left: 1.25rem;
@@ -247,6 +263,23 @@
 
 .grid-overlay {
   pointer-events: none;
+}
+
+.map-ping-icon {
+  background: transparent;
+  border: 0;
+}
+
+.map-ping-icon span {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid rgba(246, 241, 223, 0.95);
+  background: radial-gradient(circle at 30% 30%, #ffe5b8 12%, #c84b31 65%, #7c1f0f 100%);
+  box-shadow:
+    0 0 0 2px rgba(12, 37, 31, 0.35),
+    0 8px 14px rgba(12, 37, 31, 0.35);
 }
 
 .leaflet-gridPane-pane {

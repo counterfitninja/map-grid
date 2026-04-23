@@ -262,6 +262,7 @@ function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const overlayRef = useRef<BritishGridOverlay | null>(null)
+  const pingMarkerRef = useRef<L.Marker | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({ spacing: 1000, digits: 8 })
   const initialTitle = `Map Grid Printout - ${new Date().toLocaleDateString('en-GB')}`
@@ -271,6 +272,8 @@ function App() {
     digits: 8,
   })
   const [centerReference, setCenterReference] = useState('Loading grid reference...')
+  const [pingLocation, setPingLocation] = useState<L.LatLngLiteral | null>(null)
+  const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
   const [statusText, setStatusText] = useState('Initialising map...')
   const [printTitle, setPrintTitle] = useState(initialTitle)
 
@@ -281,8 +284,14 @@ function App() {
     if (mapRef.current) {
       const center = mapRef.current.getCenter()
       setCenterReference(britishGridRef(latLngToBritishGrid(center), overlayState.digits))
+
+      if (pingLocation) {
+        setPingReference(
+          britishGridRef(latLngToBritishGrid(pingLocation), overlayState.digits),
+        )
+      }
     }
-  }, [overlayState])
+  }, [overlayState, pingLocation])
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -312,6 +321,37 @@ function App() {
     overlay.addTo(map)
     overlayRef.current = overlay
 
+    const pingIcon = L.divIcon({
+      className: 'map-ping-icon',
+      html: '<span></span>',
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+    })
+
+    const placePing = (latLng: L.LatLng) => {
+      const gridReference = britishGridRef(
+        latLngToBritishGrid(latLng),
+        overlayStateRef.current.digits,
+      )
+
+      if (!pingMarkerRef.current) {
+        pingMarkerRef.current = L.marker(latLng, { icon: pingIcon }).addTo(map)
+      } else {
+        pingMarkerRef.current.setLatLng(latLng)
+      }
+
+      pingMarkerRef.current
+        .bindPopup(`<strong>Ping</strong><br />${gridReference}`)
+        .openPopup()
+
+      setPingLocation({ lat: latLng.lat, lng: latLng.lng })
+      setPingReference(gridReference)
+    }
+
+    const handleMapClick = (event: L.LeafletMouseEvent) => {
+      placePing(event.latlng)
+    }
+
     const updateReference = () => {
       const center = map.getCenter()
       setCenterReference(
@@ -322,11 +362,15 @@ function App() {
       )
     }
 
+    map.on('click', handleMapClick)
     map.on('moveend zoomend', updateReference)
     updateReference()
 
     return () => {
+      map.off('click', handleMapClick)
       map.off('moveend zoomend', updateReference)
+      pingMarkerRef.current?.remove()
+      pingMarkerRef.current = null
       overlay.remove()
       overlayRef.current = null
       map.remove()
@@ -336,6 +380,13 @@ function App() {
 
   const focusLocation = (coordinates: L.LatLngExpression) => {
     mapRef.current?.setView(coordinates, 15)
+  }
+
+  const clearPing = () => {
+    pingMarkerRef.current?.remove()
+    pingMarkerRef.current = null
+    setPingLocation(null)
+    setPingReference('No ping placed yet. Click the map.')
   }
 
   const saveEditableTitle = () => {
@@ -434,6 +485,24 @@ function App() {
           <p className="meta-label">Map centre grid reference</p>
           <p className="grid-ref">{centerReference}</p>
           <p className="status">{statusText}</p>
+        </div>
+
+        <div className="card">
+          <p className="meta-label">Dropped ping</p>
+          <p className="grid-ref grid-ref--compact">{pingReference}</p>
+          <p className="status">
+            {pingLocation
+              ? `${pingLocation.lat.toFixed(5)}, ${pingLocation.lng.toFixed(5)}`
+              : 'Click anywhere on the map to place a ping.'}
+          </p>
+          <button
+            type="button"
+            className="chip chip--secondary"
+            onClick={clearPing}
+            disabled={!pingLocation}
+          >
+            Clear ping
+          </button>
         </div>
 
         <div className="card">

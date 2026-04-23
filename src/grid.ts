@@ -60,13 +60,5 @@ function getGridLetters(easting: number, northing: number) {
   let first = (19 - n100k) - ((19 - n100k) % 5) + Math.floor((e100k + 10) / 5)
   let second = ((19 - n100k) * 5) % 25 + (e100k % 5)
 
-  if (first > 7) {
-    first += 1
-  }
-
-  if (second > 7) {
-    second += 1
-  }
-
   return `${gridLetters[first]}${gridLetters[second]}`
 }
