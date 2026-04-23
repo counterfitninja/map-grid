@@ -43,6 +43,7 @@ class BritishGridOverlay extends L.Layer {
   private svgElement: SVGSVGElement | null = null
   private groupElement: SVGGElement | null = null
   private spacing: GridSpacing = 1000
+  private readonly straightLineZoomThreshold = 13
   private readonly paneName = 'gridPane'
 
   onAdd(map: L.Map) {
@@ -124,7 +125,7 @@ class BritishGridOverlay extends L.Layer {
     minNorthing: number,
     maxNorthing: number,
   ) {
-    if (map.getZoom() <= 11) {
+    if (map.getZoom() <= this.straightLineZoomThreshold) {
       const startPoint = map.latLngToLayerPoint(
         britishGridToLatLng({ easting, northing: minNorthing }),
       )
@@ -172,7 +173,7 @@ class BritishGridOverlay extends L.Layer {
     minEasting: number,
     maxEasting: number,
   ) {
-    if (map.getZoom() <= 11) {
+    if (map.getZoom() <= this.straightLineZoomThreshold) {
       const startPoint = map.latLngToLayerPoint(
         britishGridToLatLng({ easting: minEasting, northing }),
       )
