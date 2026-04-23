@@ -11,11 +11,32 @@ import {
 } from './grid'
 
 type OverlayState = {
+  spacingMode: 'auto' | 'manual'
   spacing: GridSpacing
   digits: GridDigits
 }
 
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
+
+const getGridSpacingForZoom = (zoom: number): GridSpacing => {
+  if (zoom >= 16) {
+    return 500
+  }
+
+  if (zoom >= 14) {
+    return 1000
+  }
+
+  if (zoom >= 12) {
+    return 2000
+  }
+
+  if (zoom >= 10) {
+    return 5000
+  }
+
+  return 10000
+}
 
 class BritishGridOverlay extends L.Layer {
   private mapRef: L.Map | null = null
@@ -264,13 +285,19 @@ function App() {
   const overlayRef = useRef<BritishGridOverlay | null>(null)
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
-  const overlayStateRef = useRef<OverlayState>({ spacing: 1000, digits: 8 })
-  const initialTitle = `Map Grid Printout - ${new Date().toLocaleDateString('en-GB')}`
-  const titleBeforeEditRef = useRef(initialTitle)
-  const [overlayState, setOverlayState] = useState<OverlayState>({
+  const overlayStateRef = useRef<OverlayState>({
+    spacingMode: 'auto',
     spacing: 1000,
     digits: 8,
   })
+  const initialTitle = `Map Grid Printout - ${new Date().toLocaleDateString('en-GB')}`
+  const titleBeforeEditRef = useRef(initialTitle)
+  const [overlayState, setOverlayState] = useState<OverlayState>({
+    spacingMode: 'auto',
+    spacing: 1000,
+    digits: 8,
+  })
+  const [activeSpacing, setActiveSpacing] = useState<GridSpacing>(1000)
   const [centerReference, setCenterReference] = useState('Loading grid reference...')
   const [pingLocation, setPingLocation] = useState<L.LatLngLiteral | null>(null)
   const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
@@ -279,7 +306,15 @@ function App() {
 
   useEffect(() => {
     overlayStateRef.current = overlayState
-    overlayRef.current?.setSpacing(overlayState.spacing)
+
+    const zoom = mapRef.current?.getZoom() ?? 13
+    const spacing =
+      overlayState.spacingMode === 'auto'
+        ? getGridSpacingForZoom(zoom)
+        : overlayState.spacing
+
+    setActiveSpacing(spacing)
+    overlayRef.current?.setSpacing(spacing)
 
     if (mapRef.current) {
       const center = mapRef.current.getCenter()
@@ -317,7 +352,12 @@ function App() {
     }).addTo(map)
 
     const overlay = new BritishGridOverlay()
-    overlay.setSpacing(overlayStateRef.current.spacing)
+    const initialSpacing =
+      overlayStateRef.current.spacingMode === 'auto'
+        ? getGridSpacingForZoom(map.getZoom())
+        : overlayStateRef.current.spacing
+    overlay.setSpacing(initialSpacing)
+    setActiveSpacing(initialSpacing)
     overlay.addTo(map)
     overlayRef.current = overlay
 
@@ -354,6 +394,14 @@ function App() {
 
     const updateReference = () => {
       const center = map.getCenter()
+      const nextSpacing =
+        overlayStateRef.current.spacingMode === 'auto'
+          ? getGridSpacingForZoom(map.getZoom())
+          : overlayStateRef.current.spacing
+
+      overlayRef.current?.setSpacing(nextSpacing)
+      setActiveSpacing((current) => (current === nextSpacing ? current : nextSpacing))
+
       setCenterReference(
         britishGridRef(latLngToBritishGrid(center), overlayStateRef.current.digits),
       )
@@ -434,8 +482,9 @@ function App() {
         <p className="eyebrow">Cubs Map Printer</p>
         <h1>OpenStreetMap with a UK grid overlay for printable route cards.</h1>
         <p className="lede">
-          Pan to the area you need, switch the grid density, and use your browser print
-          dialog to produce an A4 handout with National Grid references visible.
+          Pan to the area you need, use auto-scaling grid spacing as you zoom, and use
+          your browser print dialog to produce an A4 handout with National Grid
+          references visible.
         </p>
 
         <button type="button" className="print-button" onClick={() => window.print()}>
@@ -444,9 +493,26 @@ function App() {
 
         <div className="card">
           <label>
-            <span>Grid spacing</span>
+            <span>Grid spacing mode</span>
+            <select
+              value={overlayState.spacingMode}
+              onChange={(event) =>
+                setOverlayState((current) => ({
+                  ...current,
+                  spacingMode: event.target.value as OverlayState['spacingMode'],
+                }))
+              }
+            >
+              <option value="auto">Auto (changes with zoom)</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Manual grid spacing</span>
             <select
               value={overlayState.spacing}
+              disabled={overlayState.spacingMode === 'auto'}
               onChange={(event) =>
                 setOverlayState((current) => ({
                   ...current,
@@ -461,6 +527,8 @@ function App() {
               <option value={10000}>10 km</option>
             </select>
           </label>
+
+          <p className="status">Active grid spacing: {(activeSpacing / 1000).toFixed(activeSpacing < 1000 ? 1 : 0)} km</p>
 
           <label>
             <span>Centre reference precision</span>
