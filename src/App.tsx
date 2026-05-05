@@ -345,6 +345,7 @@ function App() {
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
+  const [officialProwError, setOfficialProwError] = useState(false)
 
   useEffect(() => {
     const map = mapRef.current
@@ -386,6 +387,14 @@ function App() {
             '&copy; <a href="https://www.gov.uk/government/organisations/natural-england">Natural England</a> / DEFRA',
         },
       )
+
+      officialProwLayerRef.current.on('tileerror', () => {
+        setOfficialProwError(true)
+      })
+
+      officialProwLayerRef.current.on('tileload', () => {
+        setOfficialProwError(false)
+      })
     }
     officialProwLayerRef.current.setOpacity(footpathsOpacity)
     if (officialProwEnabled) {
@@ -726,6 +735,13 @@ function App() {
                   .replace(/^./, (c) => c.toUpperCase()) +
                   ` on (${Math.round(footpathsOpacity * 100)}% opacity).`}
           </p>
+
+          {officialProwEnabled && officialProwError && (
+            <p className="status status--warning">
+              Official PRoW source is currently unavailable (upstream server error).
+              Try again later, or use Community trails for now.
+            </p>
+          )}
         </div>
 
         <div className="card">

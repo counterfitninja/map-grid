@@ -65,6 +65,11 @@
   color: var(--ink-soft);
 }
 
+.status--warning {
+  color: #9d2c1c;
+  font-weight: 600;
+}
+
 .card {
   display: grid;
   gap: 0.6rem;
