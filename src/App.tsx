@@ -320,7 +320,8 @@ function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const overlayRef = useRef<BritishGridOverlay | null>(null)
-  const footpathsLayerRef = useRef<L.TileLayer | null>(null)
+  const communityTrailsLayerRef = useRef<L.TileLayer | null>(null)
+  const officialProwLayerRef = useRef<L.TileLayer.WMS | null>(null)
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({
@@ -341,18 +342,17 @@ function App() {
   const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
   const [statusText, setStatusText] = useState('Initialising map...')
   const [printTitle, setPrintTitle] = useState(initialTitle)
-  const [footpathsEnabled, setFootpathsEnabled] = useState(false)
+  const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
+  const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
 
   useEffect(() => {
     const map = mapRef.current
+    if (!map) return
 
-    if (!map) {
-      return
-    }
-
-    if (!footpathsLayerRef.current) {
-      footpathsLayerRef.current = L.tileLayer(
+    // Community trails layer (Waymarked Trails — OSM-based named routes)
+    if (!communityTrailsLayerRef.current) {
+      communityTrailsLayerRef.current = L.tileLayer(
         'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png',
         {
           maxZoom: 18,
@@ -363,20 +363,39 @@ function App() {
         },
       )
     }
-
-    footpathsLayerRef.current.setOpacity(footpathsOpacity)
-
-    if (footpathsEnabled) {
-      if (!map.hasLayer(footpathsLayerRef.current)) {
-        footpathsLayerRef.current.addTo(map)
+    communityTrailsLayerRef.current.setOpacity(footpathsOpacity)
+    if (communityTrailsEnabled) {
+      if (!map.hasLayer(communityTrailsLayerRef.current)) {
+        communityTrailsLayerRef.current.addTo(map)
       }
-      return
+    } else if (map.hasLayer(communityTrailsLayerRef.current)) {
+      map.removeLayer(communityTrailsLayerRef.current)
     }
 
-    if (map.hasLayer(footpathsLayerRef.current)) {
-      map.removeLayer(footpathsLayerRef.current)
+    // Official PRoW layer (DEFRA / Natural England WMS — England only)
+    if (!officialProwLayerRef.current) {
+      officialProwLayerRef.current = L.tileLayer.wms(
+        'https://environment.data.gov.uk/arcgis/services/Countryside_Access/Public_Rights_of_Way_England/MapServer/WMSServer',
+        {
+          layers: '0',
+          format: 'image/png',
+          transparent: true,
+          opacity: footpathsOpacity,
+          pane: 'overlayPane',
+          attribution:
+            '&copy; <a href="https://www.gov.uk/government/organisations/natural-england">Natural England</a> / DEFRA',
+        },
+      )
     }
-  }, [footpathsEnabled, footpathsOpacity])
+    officialProwLayerRef.current.setOpacity(footpathsOpacity)
+    if (officialProwEnabled) {
+      if (!map.hasLayer(officialProwLayerRef.current)) {
+        officialProwLayerRef.current.addTo(map)
+      }
+    } else if (map.hasLayer(officialProwLayerRef.current)) {
+      map.removeLayer(officialProwLayerRef.current)
+    }
+  }, [communityTrailsEnabled, officialProwEnabled, footpathsOpacity])
 
   useEffect(() => {
     overlayStateRef.current = overlayState
@@ -493,8 +512,10 @@ function App() {
       map.off('moveend zoomend', updateReference)
       pingMarkerRef.current?.remove()
       pingMarkerRef.current = null
-      footpathsLayerRef.current?.remove()
-      footpathsLayerRef.current = null
+      communityTrailsLayerRef.current?.remove()
+      communityTrailsLayerRef.current = null
+      officialProwLayerRef.current?.remove()
+      officialProwLayerRef.current = null
       overlay.remove()
       overlayRef.current = null
       map.remove()
@@ -651,25 +672,42 @@ function App() {
 
         <div className="card">
           <p className="meta-label">Trail overlays</p>
-          <label className="toggle-row" htmlFor="footpaths-toggle">
-            <span>Public footpaths (highlighted)</span>
+
+          <label className="toggle-row" htmlFor="community-trails-toggle">
+            <span>
+              Community trails
+              <em className="layer-source">Waymarked Trails · OSM</em>
+            </span>
             <input
-              id="footpaths-toggle"
+              id="community-trails-toggle"
               type="checkbox"
-              checked={footpathsEnabled}
-              onChange={(event) => setFootpathsEnabled(event.target.checked)}
+              checked={communityTrailsEnabled}
+              onChange={(event) => setCommunityTrailsEnabled(event.target.checked)}
+            />
+          </label>
+
+          <label className="toggle-row" htmlFor="official-prow-toggle">
+            <span>
+              Official rights of way
+              <em className="layer-source">DEFRA / Natural England · England only</em>
+            </span>
+            <input
+              id="official-prow-toggle"
+              type="checkbox"
+              checked={officialProwEnabled}
+              onChange={(event) => setOfficialProwEnabled(event.target.checked)}
             />
           </label>
 
           <label>
-            <span>Footpath highlight strength</span>
+            <span>Highlight strength</span>
             <input
               type="range"
               min={40}
               max={100}
               step={5}
               value={Math.round(footpathsOpacity * 100)}
-              disabled={!footpathsEnabled}
+              disabled={!communityTrailsEnabled && !officialProwEnabled}
               onChange={(event) =>
                 setFootpathsOpacity(Number(event.target.value) / 100)
               }
@@ -677,9 +715,16 @@ function App() {
           </label>
 
           <p className="status">
-            {footpathsEnabled
-              ? `Footpaths layer on (${Math.round(footpathsOpacity * 100)}% highlight).`
-              : 'Footpaths layer off.'}
+            {!communityTrailsEnabled && !officialProwEnabled
+              ? 'Both layers off.'
+              : [
+                  communityTrailsEnabled && 'community trails',
+                  officialProwEnabled && 'official PRoW',
+                ]
+                  .filter(Boolean)
+                  .join(' + ')
+                  .replace(/^./, (c) => c.toUpperCase()) +
+                  ` on (${Math.round(footpathsOpacity * 100)}% opacity).`}
           </p>
         </div>
 

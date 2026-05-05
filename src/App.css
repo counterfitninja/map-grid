@@ -110,6 +110,20 @@
   align-items: center;
 }
 
+.toggle-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.layer-source {
+  font-size: 0.68rem;
+  font-weight: 400;
+  font-style: normal;
+  color: var(--ink-soft);
+  letter-spacing: 0.01em;
+}
+
 .panel label span {
   font-size: 0.76rem;
   font-weight: 700;
