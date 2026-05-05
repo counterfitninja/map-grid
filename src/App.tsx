@@ -320,6 +320,7 @@ function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const overlayRef = useRef<BritishGridOverlay | null>(null)
+  const footpathsLayerRef = useRef<L.TileLayer | null>(null)
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({
@@ -340,6 +341,42 @@ function App() {
   const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
   const [statusText, setStatusText] = useState('Initialising map...')
   const [printTitle, setPrintTitle] = useState(initialTitle)
+  const [footpathsEnabled, setFootpathsEnabled] = useState(false)
+  const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
+
+  useEffect(() => {
+    const map = mapRef.current
+
+    if (!map) {
+      return
+    }
+
+    if (!footpathsLayerRef.current) {
+      footpathsLayerRef.current = L.tileLayer(
+        'https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png',
+        {
+          maxZoom: 18,
+          opacity: footpathsOpacity,
+          pane: 'overlayPane',
+          attribution:
+            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="https://waymarkedtrails.org">Waymarked Trails</a>',
+        },
+      )
+    }
+
+    footpathsLayerRef.current.setOpacity(footpathsOpacity)
+
+    if (footpathsEnabled) {
+      if (!map.hasLayer(footpathsLayerRef.current)) {
+        footpathsLayerRef.current.addTo(map)
+      }
+      return
+    }
+
+    if (map.hasLayer(footpathsLayerRef.current)) {
+      map.removeLayer(footpathsLayerRef.current)
+    }
+  }, [footpathsEnabled, footpathsOpacity])
 
   useEffect(() => {
     overlayStateRef.current = overlayState
@@ -456,6 +493,8 @@ function App() {
       map.off('moveend zoomend', updateReference)
       pingMarkerRef.current?.remove()
       pingMarkerRef.current = null
+      footpathsLayerRef.current?.remove()
+      footpathsLayerRef.current = null
       overlay.remove()
       overlayRef.current = null
       map.remove()
@@ -611,6 +650,40 @@ function App() {
         </div>
 
         <div className="card">
+          <p className="meta-label">Trail overlays</p>
+          <label className="toggle-row" htmlFor="footpaths-toggle">
+            <span>Public footpaths (highlighted)</span>
+            <input
+              id="footpaths-toggle"
+              type="checkbox"
+              checked={footpathsEnabled}
+              onChange={(event) => setFootpathsEnabled(event.target.checked)}
+            />
+          </label>
+
+          <label>
+            <span>Footpath highlight strength</span>
+            <input
+              type="range"
+              min={40}
+              max={100}
+              step={5}
+              value={Math.round(footpathsOpacity * 100)}
+              disabled={!footpathsEnabled}
+              onChange={(event) =>
+                setFootpathsOpacity(Number(event.target.value) / 100)
+              }
+            />
+          </label>
+
+          <p className="status">
+            {footpathsEnabled
+              ? `Footpaths layer on (${Math.round(footpathsOpacity * 100)}% highlight).`
+              : 'Footpaths layer off.'}
+          </p>
+        </div>
+
+        <div className="card">
           <p className="meta-label">Quick jump</p>
           <div className="chips">
             {ukMapLocations.map((location) => (
@@ -631,6 +704,7 @@ function App() {
           <ul>
             <li>Use landscape orientation for wider route sections.</li>
             <li>Turn on background graphics in the print dialog for better tile colour.</li>
+            <li>Enable footpaths to highlight tracked trail routes before printing.</li>
             <li>The overlay uses British National Grid coordinates in EPSG:27700.</li>
           </ul>
         </div>
