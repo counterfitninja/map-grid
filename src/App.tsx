@@ -52,6 +52,66 @@ const loadStoredOsSettings = (): Partial<StoredOsSettings> => {
   }
 }
 
+const normalizeOsEndpointInput = (raw: string, fallback: string) => {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return fallback
+  }
+
+  return trimmed
+}
+
+const sanitizeOsZxyEndpointInput = (raw: string) => {
+  const normalized = normalizeOsEndpointInput(raw, defaultOsZxyEndpoint)
+  const withoutQuery = normalized.split('?')[0].split('#')[0]
+  const withoutTemplate = withoutQuery
+    .replace(/\/\{z\}\/\{x\}\/\{y\}\.png\/?$/i, '')
+    .replace(/\/\d+\/\d+\/\d+\.png\/?$/i, '')
+
+  return withoutTemplate.replace(/\/+$/, '') || defaultOsZxyEndpoint
+}
+
+const sanitizeOsWmtsEndpointInput = (raw: string) => {
+  const normalized = normalizeOsEndpointInput(raw, defaultOsWmtsEndpoint)
+  const withoutQuery = normalized.split('?')[0].split('#')[0]
+  const trimmed = withoutQuery.replace(/\/+$/, '')
+
+  return trimmed || defaultOsWmtsEndpoint
+}
+
+const buildOsZxyTileTemplateUrl = (endpointInput: string, apiKey: string) => {
+  const endpoint = normalizeOsEndpointInput(endpointInput, defaultOsZxyEndpoint)
+
+  const withoutQuery = endpoint.split('?')[0]
+  const hasTemplate = /\{z\}/.test(withoutQuery) && /\{x\}/.test(withoutQuery) && /\{y\}/.test(withoutQuery)
+  const baseTemplate = hasTemplate
+    ? withoutQuery
+    : `${withoutQuery.replace(/\/+$/, '')}/{z}/{x}/{y}.png`
+
+  const separator = baseTemplate.includes('?') ? '&' : '?'
+  return `${baseTemplate}${separator}key=${encodeURIComponent(apiKey)}`
+}
+
+const buildOsWmtsTileTemplateUrl = (endpointInput: string, apiKey: string) => {
+  const endpoint = normalizeOsEndpointInput(endpointInput, defaultOsWmtsEndpoint)
+  const [base] = endpoint.split('?')
+  const separator = base.includes('?') ? '&' : '?'
+
+  return `${base}${separator}key=${encodeURIComponent(apiKey)}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
+}
+
+const buildOsZxyProbeUrl = (endpointInput: string, apiKey: string, z: number, x: number, y: number) =>
+  buildOsZxyTileTemplateUrl(endpointInput, apiKey)
+    .replace('{z}', String(z))
+    .replace('{x}', String(x))
+    .replace('{y}', String(y))
+
+const buildOsWmtsProbeUrl = (endpointInput: string, apiKey: string, z: number, x: number, y: number) =>
+  buildOsWmtsTileTemplateUrl(endpointInput, apiKey)
+    .replace('{z}', String(z))
+    .replace('{x}', String(x))
+    .replace('{y}', String(y))
+
 const getGridSpacingForZoom = (zoom: number): GridSpacing => {
   if (zoom >= 16) {
     return 500
@@ -408,6 +468,7 @@ function App() {
   const [mapKeyOpen, setMapKeyOpen] = useState(true)
   const [osKeyTestRunning, setOsKeyTestRunning] = useState(false)
   const [osKeyTestSummary, setOsKeyTestSummary] = useState('')
+  const [osEndpointAutoFixMessage, setOsEndpointAutoFixMessage] = useState('')
 
   const activeOsApiKey = osProjectApiKey.trim()
 
@@ -417,6 +478,28 @@ function App() {
     if (trimmed.length <= 10) return `${trimmed.slice(0, 2)}...${trimmed.slice(-2)}`
     return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
   }
+
+  useEffect(() => {
+    const fixedZxy = sanitizeOsZxyEndpointInput(osZxyEndpoint)
+    const fixedWmts = sanitizeOsWmtsEndpointInput(osWmtsEndpoint)
+    let changed = false
+
+    if (fixedZxy !== osZxyEndpoint) {
+      setOsZxyEndpoint(fixedZxy)
+      changed = true
+    }
+
+    if (fixedWmts !== osWmtsEndpoint) {
+      setOsWmtsEndpoint(fixedWmts)
+      changed = true
+    }
+
+    if (changed) {
+      setOsEndpointAutoFixMessage('Adjusted OS endpoints to safe base URLs.')
+    }
+    // Intentionally run once on mount to clean any previously saved malformed endpoints.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -509,13 +592,12 @@ function App() {
         osLayerRef.current = null
       }
 
-      const encodedKey = encodeURIComponent(activeOsApiKey.trim())
       const zxyBase = osZxyEndpoint.trim() || defaultOsZxyEndpoint
       const wmtsBase = osWmtsEndpoint.trim() || defaultOsWmtsEndpoint
       const url =
         osEndpoint === 'zxy'
-          ? `${zxyBase}/{z}/{x}/{y}.png?key=${encodedKey}`
-          : `${wmtsBase}?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
+          ? buildOsZxyTileTemplateUrl(zxyBase, activeOsApiKey.trim())
+          : buildOsWmtsTileTemplateUrl(wmtsBase, activeOsApiKey.trim())
 
       console.info('[OS Maps] Creating base layer', {
         endpoint: osEndpoint.toUpperCase(),
@@ -580,18 +662,17 @@ function App() {
   }, [activeOsApiKey, osEndpoint])
 
   const buildOsTileProbeUrl = (endpoint: 'zxy' | 'wmts', key: string) => {
-    const encodedKey = encodeURIComponent(key)
     const z = 10
     const x = 512
     const y = 340
-    const zxyBase = osZxyEndpoint.trim() || defaultOsZxyEndpoint
-    const wmtsBase = osWmtsEndpoint.trim() || defaultOsWmtsEndpoint
+    const zxyBase = sanitizeOsZxyEndpointInput(osZxyEndpoint)
+    const wmtsBase = sanitizeOsWmtsEndpointInput(osWmtsEndpoint)
 
     if (endpoint === 'zxy') {
-      return `${zxyBase}/${z}/${x}/${y}.png?key=${encodedKey}`
+      return buildOsZxyProbeUrl(zxyBase, key, z, x, y)
     }
 
-    return `${wmtsBase}?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}&FORMAT=image/png`
+    return buildOsWmtsProbeUrl(wmtsBase, key, z, x, y)
   }
 
   const testSelectedOsKey = async () => {
@@ -618,36 +699,41 @@ function App() {
       console.info('[OS Maps] Probing endpoint', {
         endpoint: endpoint.toUpperCase(),
         url: safeUrl,
+        mode: 'image-load',
       })
 
-      try {
-        const response = await fetch(url, { method: 'GET' })
-        console.info('[OS Maps] Probe response', {
-          endpoint: endpoint.toUpperCase(),
-          ok: response.ok,
-          status: response.status,
-          statusText: response.statusText,
-          type: response.type,
-          redirected: response.redirected,
-        })
-        return {
-          endpoint,
-          ok: response.ok,
-          detail: response.ok ? 'OK' : `HTTP ${response.status}`,
+      return await new Promise<{ endpoint: 'zxy' | 'wmts'; ok: boolean; detail: string }>((resolve) => {
+        const img = new Image()
+        const timeoutMs = 10000
+        const timer = window.setTimeout(() => {
+          img.onload = null
+          img.onerror = null
+          console.error('[OS Maps] Probe timed out', {
+            endpoint: endpoint.toUpperCase(),
+            timeoutMs,
+          })
+          resolve({ endpoint, ok: false, detail: 'Timed out' })
+        }, timeoutMs)
+
+        img.onload = () => {
+          window.clearTimeout(timer)
+          console.info('[OS Maps] Probe image loaded', {
+            endpoint: endpoint.toUpperCase(),
+          })
+          resolve({ endpoint, ok: true, detail: 'OK' })
         }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Network/CORS error'
-        console.error('[OS Maps] Probe failed', {
-          endpoint: endpoint.toUpperCase(),
-          error,
-          message,
-        })
-        return {
-          endpoint,
-          ok: false,
-          detail: message,
+
+        img.onerror = (error) => {
+          window.clearTimeout(timer)
+          console.error('[OS Maps] Probe image failed', {
+            endpoint: endpoint.toUpperCase(),
+            error,
+          })
+          resolve({ endpoint, ok: false, detail: 'Image load failed' })
         }
-      }
+
+        img.src = url
+      })
     }
 
     const [zxyResult, wmtsResult] = await Promise.all([
@@ -670,6 +756,7 @@ function App() {
     setOsWmtsEndpoint(defaultOsWmtsEndpoint)
     setOsError(false)
     setOsKeyTestSummary('')
+    setOsEndpointAutoFixMessage('Reset OS endpoints to defaults.')
   }
 
   const prowColour = (status: string | null) => {
@@ -1140,6 +1227,14 @@ function App() {
               onChange={(event) => {
                 setOsZxyEndpoint(event.target.value)
                 setOsError(false)
+                setOsEndpointAutoFixMessage('')
+              }}
+              onBlur={() => {
+                const fixed = sanitizeOsZxyEndpointInput(osZxyEndpoint)
+                if (fixed !== osZxyEndpoint) {
+                  setOsZxyEndpoint(fixed)
+                  setOsEndpointAutoFixMessage('Auto-fixed ZXY endpoint format.')
+                }
               }}
             />
           </label>
@@ -1154,9 +1249,19 @@ function App() {
               onChange={(event) => {
                 setOsWmtsEndpoint(event.target.value)
                 setOsError(false)
+                setOsEndpointAutoFixMessage('')
+              }}
+              onBlur={() => {
+                const fixed = sanitizeOsWmtsEndpointInput(osWmtsEndpoint)
+                if (fixed !== osWmtsEndpoint) {
+                  setOsWmtsEndpoint(fixed)
+                  setOsEndpointAutoFixMessage('Auto-fixed WMTS endpoint format.')
+                }
               }}
             />
           </label>
+
+          {osEndpointAutoFixMessage && <p className="status">{osEndpointAutoFixMessage}</p>}
 
           <button
             type="button"
