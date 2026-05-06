@@ -14,7 +14,7 @@
     "vite",
     "react"
   ],
-  "features": null,
+  "features": [],
   "docker_images": {
     "Nodejs 24": "ghcr.io/pelican-eggs/yolks:nodejs_24",
     "Nodejs 23": "ghcr.io/pelican-eggs/yolks:nodejs_23",
