@@ -18,6 +18,7 @@ type OverlayState = {
 
 type StoredOsSettings = {
   baseMap: 'osm' | 'os'
+  osRasterLayer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857'
   osProjectApiKey: string
   osProjectApiSecret: string
   osZxyEndpoint: string
@@ -29,6 +30,9 @@ const defaultCenter: L.LatLngExpression = [51.229, -2.321]
 const osSettingsStorageKey = 'map-grid.os-settings.v1'
 const defaultOsZxyEndpoint = 'https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857'
 const defaultOsWmtsEndpoint = 'https://api.os.uk/maps/raster/v1/wmts'
+
+const getZxyEndpointForLayer = (layer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857') =>
+  `https://api.os.uk/maps/raster/v1/zxy/${layer}`
 const buildVersion = __APP_VERSION__
 const buildCommit = __APP_BUILD_COMMIT__
 const buildMessage = __APP_BUILD_MESSAGE__
@@ -67,8 +71,9 @@ const sanitizeOsZxyEndpointInput = (raw: string) => {
   const withoutTemplate = withoutQuery
     .replace(/\/\{z\}\/\{x\}\/\{y\}\.png\/?$/i, '')
     .replace(/\/\d+\/\d+\/\d+\.png\/?$/i, '')
+  const withCompatibleProjection = withoutTemplate.replace(/_27700$/i, '_3857')
 
-  return withoutTemplate.replace(/\/+$/, '') || defaultOsZxyEndpoint
+  return withCompatibleProjection.replace(/\/+$/, '') || defaultOsZxyEndpoint
 }
 
 const sanitizeOsWmtsEndpointInput = (raw: string) => {
@@ -92,12 +97,16 @@ const buildOsZxyTileTemplateUrl = (endpointInput: string, apiKey: string) => {
   return `${baseTemplate}${separator}key=${encodeURIComponent(apiKey)}`
 }
 
-const buildOsWmtsTileTemplateUrl = (endpointInput: string, apiKey: string) => {
+const buildOsWmtsTileTemplateUrl = (
+  endpointInput: string,
+  apiKey: string,
+  layer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857',
+) => {
   const endpoint = normalizeOsEndpointInput(endpointInput, defaultOsWmtsEndpoint)
   const [base] = endpoint.split('?')
   const separator = base.includes('?') ? '&' : '?'
 
-  return `${base}${separator}key=${encodeURIComponent(apiKey)}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
+  return `${base}${separator}key=${encodeURIComponent(apiKey)}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
 }
 
 const buildOsZxyProbeUrl = (endpointInput: string, apiKey: string, z: number, x: number, y: number) =>
@@ -106,8 +115,15 @@ const buildOsZxyProbeUrl = (endpointInput: string, apiKey: string, z: number, x:
     .replace('{x}', String(x))
     .replace('{y}', String(y))
 
-const buildOsWmtsProbeUrl = (endpointInput: string, apiKey: string, z: number, x: number, y: number) =>
-  buildOsWmtsTileTemplateUrl(endpointInput, apiKey)
+const buildOsWmtsProbeUrl = (
+  endpointInput: string,
+  apiKey: string,
+  layer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857',
+  z: number,
+  x: number,
+  y: number,
+) =>
+  buildOsWmtsTileTemplateUrl(endpointInput, apiKey, layer)
     .replace('{z}', String(z))
     .replace('{x}', String(x))
     .replace('{y}', String(y))
@@ -442,8 +458,16 @@ function App() {
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
   const [storedOsSettings] = useState<Partial<StoredOsSettings>>(() => loadStoredOsSettings())
+  const initialRasterLayer =
+    storedOsSettings.osRasterLayer === 'Road_3857' ||
+    storedOsSettings.osRasterLayer === 'Light_3857'
+      ? storedOsSettings.osRasterLayer
+      : 'Outdoor_3857'
   const [baseMap, setBaseMap] = useState<'osm' | 'os'>(
     storedOsSettings.baseMap === 'os' ? 'os' : 'osm',
+  )
+  const [osRasterLayer, setOsRasterLayer] = useState<'Outdoor_3857' | 'Road_3857' | 'Light_3857'>(
+    initialRasterLayer,
   )
   const [osProjectApiKey, setOsProjectApiKey] = useState(
     storedOsSettings.osProjectApiKey ?? '',
@@ -452,7 +476,7 @@ function App() {
     storedOsSettings.osProjectApiSecret ?? '',
   )
   const [osZxyEndpoint, setOsZxyEndpoint] = useState(
-    storedOsSettings.osZxyEndpoint ?? defaultOsZxyEndpoint,
+    storedOsSettings.osZxyEndpoint ?? getZxyEndpointForLayer(initialRasterLayer),
   )
   const [osWmtsEndpoint, setOsWmtsEndpoint] = useState(
     storedOsSettings.osWmtsEndpoint ?? defaultOsWmtsEndpoint,
@@ -508,6 +532,7 @@ function App() {
 
     const payload: StoredOsSettings = {
       baseMap,
+      osRasterLayer,
       osProjectApiKey,
       osProjectApiSecret,
       osZxyEndpoint,
@@ -520,7 +545,7 @@ function App() {
     } catch {
       // Ignore storage failures (private mode/quota); app still works without persistence.
     }
-  }, [baseMap, osProjectApiKey, osProjectApiSecret, osZxyEndpoint, osWmtsEndpoint, osEndpoint])
+  }, [baseMap, osRasterLayer, osProjectApiKey, osProjectApiSecret, osZxyEndpoint, osWmtsEndpoint, osEndpoint])
 
   useEffect(() => {
     const map = mapRef.current
@@ -592,17 +617,18 @@ function App() {
         osLayerRef.current = null
       }
 
-      const zxyBase = osZxyEndpoint.trim() || defaultOsZxyEndpoint
-      const wmtsBase = osWmtsEndpoint.trim() || defaultOsWmtsEndpoint
+      const zxyBase = sanitizeOsZxyEndpointInput(osZxyEndpoint)
+      const wmtsBase = sanitizeOsWmtsEndpointInput(osWmtsEndpoint)
       const url =
         osEndpoint === 'zxy'
           ? buildOsZxyTileTemplateUrl(zxyBase, activeOsApiKey.trim())
-          : buildOsWmtsTileTemplateUrl(wmtsBase, activeOsApiKey.trim())
+          : buildOsWmtsTileTemplateUrl(wmtsBase, activeOsApiKey.trim(), osRasterLayer)
 
       console.info('[OS Maps] Creating base layer', {
         endpoint: osEndpoint.toUpperCase(),
         zxyEndpoint: zxyBase,
         wmtsEndpoint: wmtsBase,
+        layer: osRasterLayer,
         keyPreview: redactOsKey(activeOsApiKey),
       })
 
@@ -649,7 +675,7 @@ function App() {
     if (!map.hasLayer(osmBaseLayerRef.current)) {
       osmBaseLayerRef.current.addTo(map)
     }
-  }, [baseMap, activeOsApiKey, osEndpoint, osZxyEndpoint, osWmtsEndpoint])
+  }, [baseMap, activeOsApiKey, osEndpoint, osZxyEndpoint, osWmtsEndpoint, osRasterLayer])
 
   useEffect(() => {
     if (baseMap === 'os' && !activeOsApiKey.trim()) {
@@ -672,7 +698,7 @@ function App() {
       return buildOsZxyProbeUrl(zxyBase, key, z, x, y)
     }
 
-    return buildOsWmtsProbeUrl(wmtsBase, key, z, x, y)
+    return buildOsWmtsProbeUrl(wmtsBase, key, osRasterLayer, z, x, y)
   }
 
   const testSelectedOsKey = async () => {
@@ -686,6 +712,7 @@ function App() {
 
     console.info('[OS Maps] Starting key probe', {
       keyPreview: redactOsKey(key),
+      layer: osRasterLayer,
       zxyEndpoint: osZxyEndpoint,
       wmtsEndpoint: osWmtsEndpoint,
       origin: typeof window !== 'undefined' ? window.location.origin : 'unknown',
@@ -747,16 +774,34 @@ function App() {
       zxy: zxyResult,
       wmts: wmtsResult,
     })
-    setOsKeyTestSummary(summary)
+
+    if (!zxyResult.ok && wmtsResult.ok) {
+      if (osEndpoint === 'zxy') {
+        setOsEndpoint('wmts')
+      }
+      setOsKeyTestSummary(`${summary} | Auto-switched to WMTS.`)
+    } else {
+      setOsKeyTestSummary(summary)
+    }
+
     setOsKeyTestRunning(false)
   }
 
   const resetOsEndpoints = () => {
-    setOsZxyEndpoint(defaultOsZxyEndpoint)
+    setOsZxyEndpoint(getZxyEndpointForLayer(osRasterLayer))
     setOsWmtsEndpoint(defaultOsWmtsEndpoint)
     setOsError(false)
     setOsKeyTestSummary('')
     setOsEndpointAutoFixMessage('Reset OS endpoints to defaults.')
+  }
+
+  const applyOsStylePreset = (layer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857') => {
+    setOsRasterLayer(layer)
+    setOsZxyEndpoint(getZxyEndpointForLayer(layer))
+    setOsWmtsEndpoint(defaultOsWmtsEndpoint)
+    setOsError(false)
+    setOsKeyTestSummary('')
+    setOsEndpointAutoFixMessage(`Applied ${layer.replace('_3857', '')} style preset.`)
   }
 
   const prowColour = (status: string | null) => {
@@ -1186,6 +1231,20 @@ function App() {
           </label>
 
           <label>
+            <span>OS raster style preset</span>
+            <select
+              value={osRasterLayer}
+              onChange={(event) => {
+                applyOsStylePreset(event.target.value as 'Outdoor_3857' | 'Road_3857' | 'Light_3857')
+              }}
+            >
+              <option value="Outdoor_3857">Outdoor</option>
+              <option value="Road_3857">Road</option>
+              <option value="Light_3857">Light</option>
+            </select>
+          </label>
+
+          <label>
             <span>OS Data Hub Project API Key</span>
             <input
               type="password"
@@ -1298,7 +1357,7 @@ function App() {
 
           {activeOsApiKey && (
             <p className="status">
-              Using Project API Key ({redactOsKey(activeOsApiKey)}) with {osEndpoint.toUpperCase()} endpoint.
+              Using {osRasterLayer.replace('_3857', '')} with Project API Key ({redactOsKey(activeOsApiKey)}) via {osEndpoint.toUpperCase()}.
             </p>
           )}
 
