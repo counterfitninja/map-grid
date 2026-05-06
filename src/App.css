@@ -302,6 +302,18 @@
   padding-left: 1.25rem;
 }
 
+.build-meta {
+  margin-top: auto;
+  padding: 0.7rem 0.2rem 0;
+  border-top: 1px solid rgba(83, 75, 56, 0.22);
+}
+
+.build-meta .status {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .print-button {
   padding: 0.62rem 0.82rem;
   cursor: pointer;

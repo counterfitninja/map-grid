@@ -17,6 +17,10 @@ type OverlayState = {
 }
 
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
+const buildVersion = __APP_VERSION__
+const buildCommit = __APP_BUILD_COMMIT__
+const buildMessage = __APP_BUILD_MESSAGE__
+const buildTime = __APP_BUILD_TIME__
 
 const getGridSpacingForZoom = (zoom: number): GridSpacing => {
   if (zoom >= 16) {
@@ -981,6 +985,13 @@ function App() {
             <li>Enable footpaths to highlight tracked trail routes before printing.</li>
             <li>The overlay uses British National Grid coordinates in EPSG:27700.</li>
           </ul>
+        </div>
+
+        <div className="build-meta">
+          <p className="meta-label">Build</p>
+          <p className="status">Version {buildVersion} · {buildCommit}</p>
+          <p className="status">{buildMessage}</p>
+          <p className="status">Built {new Date(buildTime).toLocaleString('en-GB')}</p>
         </div>
 
       </aside>
