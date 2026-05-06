@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import L from 'leaflet'
 import './App.css'
 import {
@@ -18,13 +18,17 @@ type OverlayState = {
 
 type StoredOsSettings = {
   baseMap: 'osm' | 'os'
-  osApiKeysInput: string
-  selectedOsKeyIndex: number
+  osProjectApiKey: string
+  osProjectApiSecret: string
+  osZxyEndpoint: string
+  osWmtsEndpoint: string
   osEndpoint: 'zxy' | 'wmts'
 }
 
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
 const osSettingsStorageKey = 'map-grid.os-settings.v1'
+const defaultOsZxyEndpoint = 'https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857'
+const defaultOsWmtsEndpoint = 'https://api.os.uk/maps/raster/v1/wmts'
 const buildVersion = __APP_VERSION__
 const buildCommit = __APP_BUILD_COMMIT__
 const buildMessage = __APP_BUILD_MESSAGE__
@@ -381,11 +385,17 @@ function App() {
   const [baseMap, setBaseMap] = useState<'osm' | 'os'>(
     storedOsSettings.baseMap === 'os' ? 'os' : 'osm',
   )
-  const [osApiKeysInput, setOsApiKeysInput] = useState(storedOsSettings.osApiKeysInput ?? '')
-  const [selectedOsKeyIndex, setSelectedOsKeyIndex] = useState(
-    Number.isInteger(storedOsSettings.selectedOsKeyIndex)
-      ? Math.max(0, storedOsSettings.selectedOsKeyIndex as number)
-      : 0,
+  const [osProjectApiKey, setOsProjectApiKey] = useState(
+    storedOsSettings.osProjectApiKey ?? '',
+  )
+  const [osProjectApiSecret, setOsProjectApiSecret] = useState(
+    storedOsSettings.osProjectApiSecret ?? '',
+  )
+  const [osZxyEndpoint, setOsZxyEndpoint] = useState(
+    storedOsSettings.osZxyEndpoint ?? defaultOsZxyEndpoint,
+  )
+  const [osWmtsEndpoint, setOsWmtsEndpoint] = useState(
+    storedOsSettings.osWmtsEndpoint ?? defaultOsWmtsEndpoint,
   )
   const [osEndpoint, setOsEndpoint] = useState<'zxy' | 'wmts'>(
     storedOsSettings.osEndpoint === 'wmts' ? 'wmts' : 'zxy',
@@ -399,32 +409,7 @@ function App() {
   const [osKeyTestRunning, setOsKeyTestRunning] = useState(false)
   const [osKeyTestSummary, setOsKeyTestSummary] = useState('')
 
-  const osApiKeys = useMemo(
-    () =>
-      osApiKeysInput
-        .split(/\r?\n/)
-        .map((line, index) => {
-          const trimmed = line.trim()
-          if (!trimmed) return null
-
-          const separatorIndex = trimmed.indexOf(':')
-          if (separatorIndex > 0) {
-            const label = trimmed.slice(0, separatorIndex).trim()
-            const key = trimmed.slice(separatorIndex + 1).trim()
-
-            if (label && key) {
-              return { key, label }
-            }
-          }
-
-          return { key: trimmed, label: `Key ${index + 1}` }
-        })
-        .filter((entry): entry is { key: string; label: string } => Boolean(entry)),
-    [osApiKeysInput],
-  )
-
-  const activeOsApiKeyEntry = osApiKeys[selectedOsKeyIndex] ?? null
-  const activeOsApiKey = activeOsApiKeyEntry?.key ?? ''
+  const activeOsApiKey = osProjectApiKey.trim()
 
   const redactOsKey = (key: string) => {
     const trimmed = key.trim()
@@ -440,8 +425,10 @@ function App() {
 
     const payload: StoredOsSettings = {
       baseMap,
-      osApiKeysInput,
-      selectedOsKeyIndex,
+      osProjectApiKey,
+      osProjectApiSecret,
+      osZxyEndpoint,
+      osWmtsEndpoint,
       osEndpoint,
     }
 
@@ -450,7 +437,7 @@ function App() {
     } catch {
       // Ignore storage failures (private mode/quota); app still works without persistence.
     }
-  }, [baseMap, osApiKeysInput, selectedOsKeyIndex, osEndpoint])
+  }, [baseMap, osProjectApiKey, osProjectApiSecret, osZxyEndpoint, osWmtsEndpoint, osEndpoint])
 
   useEffect(() => {
     const map = mapRef.current
@@ -523,14 +510,17 @@ function App() {
       }
 
       const encodedKey = encodeURIComponent(activeOsApiKey.trim())
+      const zxyBase = osZxyEndpoint.trim() || defaultOsZxyEndpoint
+      const wmtsBase = osWmtsEndpoint.trim() || defaultOsWmtsEndpoint
       const url =
         osEndpoint === 'zxy'
-          ? `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/{z}/{x}/{y}.png?key=${encodedKey}`
-          : `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
+          ? `${zxyBase}/{z}/{x}/{y}.png?key=${encodedKey}`
+          : `${wmtsBase}?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
 
       console.info('[OS Maps] Creating base layer', {
         endpoint: osEndpoint.toUpperCase(),
-        activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
+        zxyEndpoint: zxyBase,
+        wmtsEndpoint: wmtsBase,
         keyPreview: redactOsKey(activeOsApiKey),
       })
 
@@ -548,7 +538,6 @@ function App() {
         setOsError(true)
         console.error('[OS Maps] Tile error', {
           endpoint: osEndpoint.toUpperCase(),
-          activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
           keyPreview: redactOsKey(activeOsApiKey),
           event,
         })
@@ -559,7 +548,6 @@ function App() {
           firstTileLoadedLogged = true
           console.info('[OS Maps] First tile loaded successfully', {
             endpoint: osEndpoint.toUpperCase(),
-            activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
           })
         }
       })
@@ -579,17 +567,13 @@ function App() {
     if (!map.hasLayer(osmBaseLayerRef.current)) {
       osmBaseLayerRef.current.addTo(map)
     }
-  }, [baseMap, activeOsApiKey, osEndpoint])
+  }, [baseMap, activeOsApiKey, osEndpoint, osZxyEndpoint, osWmtsEndpoint])
 
   useEffect(() => {
-    if (selectedOsKeyIndex >= osApiKeys.length) {
-      setSelectedOsKeyIndex(osApiKeys.length > 0 ? osApiKeys.length - 1 : 0)
-    }
-
-    if (baseMap === 'os' && osApiKeys.length === 0) {
+    if (baseMap === 'os' && !activeOsApiKey.trim()) {
       setBaseMap('osm')
     }
-  }, [selectedOsKeyIndex, osApiKeys.length, baseMap])
+  }, [baseMap, activeOsApiKey])
 
   useEffect(() => {
     setOsKeyTestSummary('')
@@ -600,12 +584,14 @@ function App() {
     const z = 10
     const x = 512
     const y = 340
+    const zxyBase = osZxyEndpoint.trim() || defaultOsZxyEndpoint
+    const wmtsBase = osWmtsEndpoint.trim() || defaultOsWmtsEndpoint
 
     if (endpoint === 'zxy') {
-      return `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/${z}/${x}/${y}.png?key=${encodedKey}`
+      return `${zxyBase}/${z}/${x}/${y}.png?key=${encodedKey}`
     }
 
-    return `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}&FORMAT=image/png`
+    return `${wmtsBase}?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}&FORMAT=image/png`
   }
 
   const testSelectedOsKey = async () => {
@@ -618,8 +604,9 @@ function App() {
     setOsKeyTestSummary('Testing selected key against ZXY and WMTS...')
 
     console.info('[OS Maps] Starting key probe', {
-      activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
       keyPreview: redactOsKey(key),
+      zxyEndpoint: osZxyEndpoint,
+      wmtsEndpoint: osWmtsEndpoint,
       origin: typeof window !== 'undefined' ? window.location.origin : 'unknown',
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
     })
@@ -676,6 +663,13 @@ function App() {
     })
     setOsKeyTestSummary(summary)
     setOsKeyTestRunning(false)
+  }
+
+  const resetOsEndpoints = () => {
+    setOsZxyEndpoint(defaultOsZxyEndpoint)
+    setOsWmtsEndpoint(defaultOsWmtsEndpoint)
+    setOsError(false)
+    setOsKeyTestSummary('')
   }
 
   const prowColour = (status: string | null) => {
@@ -1105,37 +1099,72 @@ function App() {
           </label>
 
           <label>
-            <span>OS Data Hub API keys (one per line)</span>
-            <textarea
-              placeholder="Examples:&#10;Dev key: abc123...&#10;Prod key: xyz789...&#10;or just paste raw keys one per line"
-              value={osApiKeysInput}
+            <span>OS Data Hub Project API Key</span>
+            <input
+              type="password"
+              placeholder="Paste Project API Key"
+              value={osProjectApiKey}
               autoComplete="off"
-              rows={3}
               onChange={(event) => {
-                setOsApiKeysInput(event.target.value)
+                setOsProjectApiKey(event.target.value)
                 setOsError(false)
               }}
             />
           </label>
 
-          {osApiKeys.length > 1 && (
-            <label>
-              <span>Active OS key</span>
-              <select
-                value={String(selectedOsKeyIndex)}
-                onChange={(event) => {
-                  setSelectedOsKeyIndex(Number(event.target.value))
-                  setOsError(false)
-                }}
-              >
-                {osApiKeys.map((key, index) => (
-                  <option key={index} value={String(index)}>
-                    {key.label} ({key.key.slice(0, 6)}...{key.key.slice(-4)})
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
+          <label>
+            <span>OS Data Hub Project API Secret</span>
+            <input
+              type="password"
+              placeholder="Paste Project API Secret (optional in browser)"
+              value={osProjectApiSecret}
+              autoComplete="off"
+              onChange={(event) => {
+                setOsProjectApiSecret(event.target.value)
+              }}
+            />
+          </label>
+
+          <p className="status">
+            Project API Secret is stored for reference only here and is not sent by this
+            browser app. Keep it server-side for production use.
+          </p>
+
+          <label>
+            <span>OS Maps ZXY endpoint</span>
+            <input
+              type="text"
+              placeholder={defaultOsZxyEndpoint}
+              value={osZxyEndpoint}
+              autoComplete="off"
+              onChange={(event) => {
+                setOsZxyEndpoint(event.target.value)
+                setOsError(false)
+              }}
+            />
+          </label>
+
+          <label>
+            <span>OS Maps WMTS endpoint</span>
+            <input
+              type="text"
+              placeholder={defaultOsWmtsEndpoint}
+              value={osWmtsEndpoint}
+              autoComplete="off"
+              onChange={(event) => {
+                setOsWmtsEndpoint(event.target.value)
+                setOsError(false)
+              }}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="chip chip--secondary"
+            onClick={resetOsEndpoints}
+          >
+            Reset OS endpoints
+          </button>
 
           <label>
             <span>OS endpoint</span>
@@ -1164,7 +1193,7 @@ function App() {
 
           {activeOsApiKey && (
             <p className="status">
-              Using {activeOsApiKeyEntry?.label ?? `key ${selectedOsKeyIndex + 1}`} with {osEndpoint.toUpperCase()} endpoint.
+              Using Project API Key ({redactOsKey(activeOsApiKey)}) with {osEndpoint.toUpperCase()} endpoint.
             </p>
           )}
 
@@ -1172,7 +1201,7 @@ function App() {
 
           {!activeOsApiKey.trim() && (
             <p className="status">
-              Add at least one key from{' '}
+              Add your Project API Key from{' '}
               <a
                 href="https://osdatahub.os.uk/"
                 target="_blank"
@@ -1180,7 +1209,7 @@ function App() {
               >
                 osdatahub.os.uk
               </a>
-              {' '}→ API Dashboard.
+              {' '}→ Project → Credentials.
             </p>
           )}
 
