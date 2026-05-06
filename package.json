@@ -7,8 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "start": "node server.mjs",
+    "convert:prow": "node scripts/convert-prow.mjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepare": "husky"
   },
   "dependencies": {
     "@types/leaflet": "^1.9.21",
@@ -29,6 +31,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "husky": "^9.1.7",
     "shapefile": "^0.6.6",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",

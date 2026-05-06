@@ -1,0 +1,5 @@
+npm run convert:prow
+
+if [ -f "public/somerset-prow.geojson" ]; then
+	git add "public/somerset-prow.geojson"
+fi

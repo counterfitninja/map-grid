@@ -7,6 +7,7 @@
 
 import { open } from 'shapefile'
 import { createWriteStream } from 'fs'
+import { access, stat } from 'fs/promises'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import proj4 from 'proj4'
@@ -16,6 +17,7 @@ const root = resolve(__dirname, '..')
 
 const SHP = resolve(root, 'Rights of Way GIS files', 'Paths_Mar26_polyline.shp')
 const DBF = resolve(root, 'Rights of Way GIS files', 'Paths_Mar26_polyline.dbf')
+const SHX = resolve(root, 'Rights of Way GIS files', 'Paths_Mar26_polyline.shx')
 const OUT = resolve(root, 'public', 'somerset-prow.geojson')
 
 proj4.defs(
@@ -35,6 +37,40 @@ function convertGeometry(geom) {
   }
   return geom
 }
+
+const fileExists = async (path) => {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const canConvert =
+  (await fileExists(SHP)) &&
+  (await fileExists(DBF)) &&
+  (await fileExists(SHX))
+
+if (!canConvert) {
+  console.warn(
+    '[Somerset PRoW] Source shapefile missing; skipping conversion and keeping existing public/somerset-prow.geojson.',
+  )
+  process.exit(0)
+}
+
+const sourceStats = await Promise.all([stat(SHP), stat(DBF), stat(SHX)])
+const newestSourceTime = Math.max(...sourceStats.map((s) => s.mtimeMs))
+
+if (await fileExists(OUT)) {
+  const outStat = await stat(OUT)
+  if (outStat.mtimeMs >= newestSourceTime) {
+    console.info('[Somerset PRoW] GeoJSON already up to date; skipping conversion.')
+    process.exit(0)
+  }
+}
+
+console.info('[Somerset PRoW] Converting shapefile to public/somerset-prow.geojson ...')
 
 const out = createWriteStream(OUT, 'utf8')
 out.write('{"type":"FeatureCollection","features":[\n')

@@ -458,6 +458,7 @@ function App() {
     if (!somersetProwEnabled) {
       if (somersetProwLayerRef.current && map.hasLayer(somersetProwLayerRef.current)) {
         map.removeLayer(somersetProwLayerRef.current)
+        console.info('[Somerset PRoW] Layer removed from map.')
       }
       return
     }
@@ -466,11 +467,13 @@ function App() {
     if (somersetProwLayerRef.current) {
       if (!map.hasLayer(somersetProwLayerRef.current)) {
         somersetProwLayerRef.current.addTo(map)
+        console.info('[Somerset PRoW] Reusing cached layer and adding to map.')
       }
       somersetProwLayerRef.current.setStyle({ opacity: footpathsOpacity })
       return
     }
 
+    console.info('[Somerset PRoW] Loading /somerset-prow.geojson ...')
     setSomersetProwStatus('loading')
     fetch('/somerset-prow.geojson')
       .then((r) => {
@@ -479,6 +482,7 @@ function App() {
       })
       .then((data) => {
         if (!mapRef.current) return
+        const featureCount = Array.isArray(data?.features) ? data.features.length : 0
         somersetProwLayerRef.current = L.geoJSON(data, {
           style: (feature) => ({
             color: prowColour(feature?.properties?.status ?? null),
@@ -489,8 +493,12 @@ function App() {
         })
         somersetProwLayerRef.current.addTo(mapRef.current)
         setSomersetProwStatus('ready')
+        console.info(`[Somerset PRoW] Loaded ${featureCount} features.`)
       })
-      .catch(() => setSomersetProwStatus('error'))
+      .catch((error: unknown) => {
+        setSomersetProwStatus('error')
+        console.error('[Somerset PRoW] Failed to load GeoJSON.', error)
+      })
   // prowColour is stable (defined outside effect deps), footpathsOpacity triggers style refresh
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [somersetProwEnabled, footpathsOpacity])
@@ -787,6 +795,17 @@ function App() {
               onChange={(event) => setSomersetProwEnabled(event.target.checked)}
             />
           </label>
+
+          <p className="status">
+            Download source data:{' '}
+            <a
+              href="https://somersetcc.sharepoint.com/:u:/s/SCCPublic/EcSDZsLMPVBDgcszPfyjwUQBATozyF8hWIFkdU8fbQC7nA?e=QvJG7R"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Somerset Rights of Way GIS files
+            </a>
+          </p>
 
           {somersetProwEnabled && somersetProwStatus !== 'idle' && (
             <p className="status">
