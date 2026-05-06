@@ -16,11 +16,37 @@ type OverlayState = {
   digits: GridDigits
 }
 
+type StoredOsSettings = {
+  baseMap: 'osm' | 'os'
+  osApiKeysInput: string
+  selectedOsKeyIndex: number
+  osEndpoint: 'zxy' | 'wmts'
+}
+
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
+const osSettingsStorageKey = 'map-grid.os-settings.v1'
 const buildVersion = __APP_VERSION__
 const buildCommit = __APP_BUILD_COMMIT__
 const buildMessage = __APP_BUILD_MESSAGE__
 const buildTime = __APP_BUILD_TIME__
+
+const loadStoredOsSettings = (): Partial<StoredOsSettings> => {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(osSettingsStorageKey)
+    if (!raw) {
+      return {}
+    }
+
+    const parsed = JSON.parse(raw) as Partial<StoredOsSettings>
+    return parsed ?? {}
+  } catch {
+    return {}
+  }
+}
 
 const getGridSpacingForZoom = (zoom: number): GridSpacing => {
   if (zoom >= 16) {
@@ -351,16 +377,27 @@ function App() {
   const [printTitle, setPrintTitle] = useState(initialTitle)
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
-  const [baseMap, setBaseMap] = useState<'osm' | 'os'>('osm')
-  const [osApiKeysInput, setOsApiKeysInput] = useState('')
-  const [selectedOsKeyIndex, setSelectedOsKeyIndex] = useState(0)
-  const [osEndpoint, setOsEndpoint] = useState<'zxy' | 'wmts'>('zxy')
+  const [storedOsSettings] = useState<Partial<StoredOsSettings>>(() => loadStoredOsSettings())
+  const [baseMap, setBaseMap] = useState<'osm' | 'os'>(
+    storedOsSettings.baseMap === 'os' ? 'os' : 'osm',
+  )
+  const [osApiKeysInput, setOsApiKeysInput] = useState(storedOsSettings.osApiKeysInput ?? '')
+  const [selectedOsKeyIndex, setSelectedOsKeyIndex] = useState(
+    Number.isInteger(storedOsSettings.selectedOsKeyIndex)
+      ? Math.max(0, storedOsSettings.selectedOsKeyIndex as number)
+      : 0,
+  )
+  const [osEndpoint, setOsEndpoint] = useState<'zxy' | 'wmts'>(
+    storedOsSettings.osEndpoint === 'wmts' ? 'wmts' : 'zxy',
+  )
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
   const [officialProwError, setOfficialProwError] = useState(false)
   const [osError, setOsError] = useState(false)
   const [somersetProwEnabled, setSomersetProwEnabled] = useState(false)
   const [somersetProwStatus, setSomersetProwStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const [mapKeyOpen, setMapKeyOpen] = useState(true)
+  const [osKeyTestRunning, setOsKeyTestRunning] = useState(false)
+  const [osKeyTestSummary, setOsKeyTestSummary] = useState('')
 
   const osApiKeys = useMemo(
     () =>
@@ -388,6 +425,25 @@ function App() {
 
   const activeOsApiKeyEntry = osApiKeys[selectedOsKeyIndex] ?? null
   const activeOsApiKey = activeOsApiKeyEntry?.key ?? ''
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const payload: StoredOsSettings = {
+      baseMap,
+      osApiKeysInput,
+      selectedOsKeyIndex,
+      osEndpoint,
+    }
+
+    try {
+      window.localStorage.setItem(osSettingsStorageKey, JSON.stringify(payload))
+    } catch {
+      // Ignore storage failures (private mode/quota); app still works without persistence.
+    }
+  }, [baseMap, osApiKeysInput, selectedOsKeyIndex, osEndpoint])
 
   useEffect(() => {
     const map = mapRef.current
@@ -463,7 +519,7 @@ function App() {
       const url =
         osEndpoint === 'zxy'
           ? `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/{z}/{x}/{y}.png?key=${encodedKey}`
-          : `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
+          : `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
 
       osLayerRef.current = L.tileLayer(
         url,
@@ -503,6 +559,62 @@ function App() {
       setBaseMap('osm')
     }
   }, [selectedOsKeyIndex, osApiKeys.length, baseMap])
+
+  useEffect(() => {
+    setOsKeyTestSummary('')
+  }, [activeOsApiKey, osEndpoint])
+
+  const buildOsTileProbeUrl = (endpoint: 'zxy' | 'wmts', key: string) => {
+    const encodedKey = encodeURIComponent(key)
+    const z = 10
+    const x = 512
+    const y = 340
+
+    if (endpoint === 'zxy') {
+      return `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/${z}/${x}/${y}.png?key=${encodedKey}`
+    }
+
+    return `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:${z}&TILEROW=${y}&TILECOL=${x}&FORMAT=image/png`
+  }
+
+  const testSelectedOsKey = async () => {
+    const key = activeOsApiKey.trim()
+    if (!key || osKeyTestRunning) {
+      return
+    }
+
+    setOsKeyTestRunning(true)
+    setOsKeyTestSummary('Testing selected key against ZXY and WMTS...')
+
+    const testEndpoint = async (endpoint: 'zxy' | 'wmts') => {
+      const url = buildOsTileProbeUrl(endpoint, key)
+
+      try {
+        const response = await fetch(url, { method: 'GET' })
+        return {
+          endpoint,
+          ok: response.ok,
+          detail: response.ok ? 'OK' : `HTTP ${response.status}`,
+        }
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Network/CORS error'
+        return {
+          endpoint,
+          ok: false,
+          detail: message,
+        }
+      }
+    }
+
+    const [zxyResult, wmtsResult] = await Promise.all([
+      testEndpoint('zxy'),
+      testEndpoint('wmts'),
+    ])
+
+    const summary = `ZXY: ${zxyResult.detail} | WMTS: ${wmtsResult.detail}`
+    setOsKeyTestSummary(summary)
+    setOsKeyTestRunning(false)
+  }
 
   const prowColour = (status: string | null) => {
     switch ((status ?? '').toLowerCase()) {
@@ -977,11 +1089,24 @@ function App() {
             </select>
           </label>
 
+          <button
+            type="button"
+            className="chip chip--secondary"
+            disabled={!activeOsApiKey.trim() || osKeyTestRunning}
+            onClick={() => {
+              void testSelectedOsKey()
+            }}
+          >
+            {osKeyTestRunning ? 'Testing key...' : 'Test selected key (ZXY + WMTS)'}
+          </button>
+
           {activeOsApiKey && (
             <p className="status">
               Using {activeOsApiKeyEntry?.label ?? `key ${selectedOsKeyIndex + 1}`} with {osEndpoint.toUpperCase()} endpoint.
             </p>
           )}
+
+          {osKeyTestSummary && <p className="status">{osKeyTestSummary}</p>}
 
           {!activeOsApiKey.trim() && (
             <p className="status">
@@ -1035,8 +1160,9 @@ function App() {
 
           {baseMap === 'os' && osError && (
             <p className="status status--warning">
-              OS Maps returned an error — check your API key is valid and the
-              OS Maps API is enabled for the selected key and endpoint.
+              OS Maps returned an error for {osEndpoint.toUpperCase()} — check key
+              restrictions (referrer/origin), confirm OS Maps API is enabled for this key,
+              and try ZXY first to validate the key.
             </p>
           )}
         </div>
