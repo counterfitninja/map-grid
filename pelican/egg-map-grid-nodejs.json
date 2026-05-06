@@ -23,7 +23,7 @@
     "Nodejs 20": "ghcr.io/pelican-eggs/yolks:nodejs_20"
   },
   "file_denylist": [],
-  "startup": "if [[ -d .git ]] && [[ {{AUTO_UPDATE}} == \"1\" ]]; then git pull; fi; if [[ ! -z ${NODE_PACKAGES} ]]; then /usr/local/bin/npm install ${NODE_PACKAGES}; fi; if [[ ! -z ${UNNODE_PACKAGES} ]]; then /usr/local/bin/npm uninstall ${UNNODE_PACKAGES}; fi; if [ -f /home/container/package.json ]; then /usr/local/bin/npm install; /usr/local/bin/npm run build; fi; /usr/local/bin/node \"/home/container/${MAIN_FILE}\" ${NODE_ARGS}",
+  "startup": "if [[ -d .git ]] && [[ {{AUTO_UPDATE}} == \"1\" ]]; then BRANCH_NAME=\"${BRANCH:-$(git rev-parse --abbrev-ref HEAD)}\"; git fetch --all --prune; git reset --hard \"origin/${BRANCH_NAME}\"; fi; if [[ ! -z ${NODE_PACKAGES} ]]; then /usr/local/bin/npm install ${NODE_PACKAGES}; fi; if [[ ! -z ${UNNODE_PACKAGES} ]]; then /usr/local/bin/npm uninstall ${UNNODE_PACKAGES}; fi; if [ -f /home/container/package.json ]; then /usr/local/bin/npm ci; /usr/local/bin/npm run build; fi; /usr/local/bin/node \"/home/container/${MAIN_FILE}\" ${NODE_ARGS}",
   "config": {
     "files": "{}",
     "startup": "{\n    \"done\": [\n        \"Serving dist on http://0.0.0.0\",\n        \"Server marked as running\"\n    ]\n}",
