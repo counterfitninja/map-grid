@@ -366,12 +366,28 @@ function App() {
     () =>
       osApiKeysInput
         .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean),
+        .map((line, index) => {
+          const trimmed = line.trim()
+          if (!trimmed) return null
+
+          const separatorIndex = trimmed.indexOf(':')
+          if (separatorIndex > 0) {
+            const label = trimmed.slice(0, separatorIndex).trim()
+            const key = trimmed.slice(separatorIndex + 1).trim()
+
+            if (label && key) {
+              return { key, label }
+            }
+          }
+
+          return { key: trimmed, label: `Key ${index + 1}` }
+        })
+        .filter((entry): entry is { key: string; label: string } => Boolean(entry)),
     [osApiKeysInput],
   )
 
-  const activeOsApiKey = osApiKeys[selectedOsKeyIndex] ?? ''
+  const activeOsApiKeyEntry = osApiKeys[selectedOsKeyIndex] ?? null
+  const activeOsApiKey = activeOsApiKeyEntry?.key ?? ''
 
   useEffect(() => {
     const map = mapRef.current
@@ -917,7 +933,7 @@ function App() {
           <label>
             <span>OS Data Hub API keys (one per line)</span>
             <textarea
-              placeholder="Paste one key per line…"
+              placeholder="Examples:&#10;Dev key: abc123...&#10;Prod key: xyz789...&#10;or just paste raw keys one per line"
               value={osApiKeysInput}
               autoComplete="off"
               rows={3}
@@ -940,7 +956,7 @@ function App() {
               >
                 {osApiKeys.map((key, index) => (
                   <option key={index} value={String(index)}>
-                    Key {index + 1} ({key.slice(0, 6)}...{key.slice(-4)})
+                    {key.label} ({key.key.slice(0, 6)}...{key.key.slice(-4)})
                   </option>
                 ))}
               </select>
@@ -963,7 +979,7 @@ function App() {
 
           {activeOsApiKey && (
             <p className="status">
-              Using key {selectedOsKeyIndex + 1} with {osEndpoint.toUpperCase()} endpoint.
+              Using {activeOsApiKeyEntry?.label ?? `key ${selectedOsKeyIndex + 1}`} with {osEndpoint.toUpperCase()} endpoint.
             </p>
           )}
 
