@@ -70,6 +70,30 @@
   font-weight: 600;
 }
 
+.prow-legend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.prow-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  color: var(--ink-strong);
+}
+
+.prow-swatch {
+  display: inline-block;
+  width: 1.6rem;
+  height: 3px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
 .card {
   display: grid;
   gap: 0.6rem;
@@ -224,6 +248,13 @@
 
 .panel input::placeholder {
   color: rgba(27, 36, 31, 0.58);
+}
+
+.panel a {
+  color: #1d5547;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .chips {

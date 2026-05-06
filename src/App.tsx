@@ -322,6 +322,8 @@ function App() {
   const overlayRef = useRef<BritishGridOverlay | null>(null)
   const communityTrailsLayerRef = useRef<L.TileLayer | null>(null)
   const officialProwLayerRef = useRef<L.TileLayer.WMS | null>(null)
+  const osLayerRef = useRef<L.TileLayer | null>(null)
+  const somersetProwLayerRef = useRef<L.GeoJSON | null>(null)
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({
@@ -344,8 +346,13 @@ function App() {
   const [printTitle, setPrintTitle] = useState(initialTitle)
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
+  const [osEnabled, setOsEnabled] = useState(false)
+  const [osApiKey, setOsApiKey] = useState('')
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
   const [officialProwError, setOfficialProwError] = useState(false)
+  const [osError, setOsError] = useState(false)
+  const [somersetProwEnabled, setSomersetProwEnabled] = useState(false)
+  const [somersetProwStatus, setSomersetProwStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
 
   useEffect(() => {
     const map = mapRef.current
@@ -405,6 +412,88 @@ function App() {
       map.removeLayer(officialProwLayerRef.current)
     }
   }, [communityTrailsEnabled, officialProwEnabled, footpathsOpacity])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    // Remove stale OS layer whenever key or enabled state changes so we rebuild with the new key
+    if (osLayerRef.current) {
+      if (map.hasLayer(osLayerRef.current)) map.removeLayer(osLayerRef.current)
+      osLayerRef.current = null
+    }
+
+    if (!osEnabled || !osApiKey.trim()) return
+
+    osLayerRef.current = L.tileLayer(
+      `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/{z}/{x}/{y}.png?key=${encodeURIComponent(osApiKey.trim())}`,
+      {
+        maxZoom: 20,
+        opacity: footpathsOpacity,
+        pane: 'overlayPane',
+        attribution:
+          'Contains OS data &copy; <a href="https://www.ordnancesurvey.co.uk">Ordnance Survey</a>',
+      },
+    )
+
+    osLayerRef.current.on('tileerror', () => setOsError(true))
+    osLayerRef.current.on('tileload', () => setOsError(false))
+    osLayerRef.current.addTo(map)
+  }, [osEnabled, osApiKey, footpathsOpacity])
+
+  const prowColour = (status: string | null) => {
+    switch ((status ?? '').toLowerCase()) {
+      case 'footpath': return '#1b7c3c'
+      case 'bridleway': return '#c96a00'
+      case 'restricted byway': return '#7b3fa0'
+      case 'byway open to all traffic': return '#b71c1c'
+      default: return '#555555'
+    }
+  }
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!somersetProwEnabled) {
+      if (somersetProwLayerRef.current && map.hasLayer(somersetProwLayerRef.current)) {
+        map.removeLayer(somersetProwLayerRef.current)
+      }
+      return
+    }
+
+    // Already loaded — just re-add and re-apply opacity
+    if (somersetProwLayerRef.current) {
+      if (!map.hasLayer(somersetProwLayerRef.current)) {
+        somersetProwLayerRef.current.addTo(map)
+      }
+      somersetProwLayerRef.current.setStyle({ opacity: footpathsOpacity })
+      return
+    }
+
+    setSomersetProwStatus('loading')
+    fetch('/somerset-prow.geojson')
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then((data) => {
+        if (!mapRef.current) return
+        somersetProwLayerRef.current = L.geoJSON(data, {
+          style: (feature) => ({
+            color: prowColour(feature?.properties?.status ?? null),
+            weight: 2,
+            opacity: footpathsOpacity,
+          }),
+          pane: 'overlayPane',
+        })
+        somersetProwLayerRef.current.addTo(mapRef.current)
+        setSomersetProwStatus('ready')
+      })
+      .catch(() => setSomersetProwStatus('error'))
+  // prowColour is stable (defined outside effect deps), footpathsOpacity triggers style refresh
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [somersetProwEnabled, footpathsOpacity])
 
   useEffect(() => {
     overlayStateRef.current = overlayState
@@ -525,6 +614,10 @@ function App() {
       communityTrailsLayerRef.current = null
       officialProwLayerRef.current?.remove()
       officialProwLayerRef.current = null
+      osLayerRef.current?.remove()
+      osLayerRef.current = null
+      somersetProwLayerRef.current?.remove()
+      somersetProwLayerRef.current = null
       overlay.remove()
       overlayRef.current = null
       map.remove()
@@ -682,6 +775,38 @@ function App() {
         <div className="card">
           <p className="meta-label">Trail overlays</p>
 
+          <label className="toggle-row" htmlFor="somerset-prow-toggle">
+            <span>
+              Somerset definitive PRoW
+              <em className="layer-source">Somerset Council · March 2026 · OGL</em>
+            </span>
+            <input
+              id="somerset-prow-toggle"
+              type="checkbox"
+              checked={somersetProwEnabled}
+              onChange={(event) => setSomersetProwEnabled(event.target.checked)}
+            />
+          </label>
+
+          {somersetProwEnabled && somersetProwStatus !== 'idle' && (
+            <p className="status">
+              {somersetProwStatus === 'loading' && 'Loading Somerset PRoW data…'}
+              {somersetProwStatus === 'ready' && '16,658 paths loaded.'}
+              {somersetProwStatus === 'error' && (
+                <span className="status--warning">Failed to load Somerset PRoW data.</span>
+              )}
+            </p>
+          )}
+
+          {somersetProwEnabled && somersetProwStatus === 'ready' && (
+            <ul className="prow-legend">
+              <li><span className="prow-swatch" style={{ background: '#1b7c3c' }} />Footpath</li>
+              <li><span className="prow-swatch" style={{ background: '#c96a00' }} />Bridleway</li>
+              <li><span className="prow-swatch" style={{ background: '#7b3fa0' }} />Restricted byway</li>
+              <li><span className="prow-swatch" style={{ background: '#b71c1c' }} />Byway (all traffic)</li>
+            </ul>
+          )}
+
           <label className="toggle-row" htmlFor="community-trails-toggle">
             <span>
               Community trails
@@ -708,6 +833,48 @@ function App() {
             />
           </label>
 
+          <label className="toggle-row" htmlFor="os-maps-toggle">
+            <span>
+              OS Outdoor map
+              <em className="layer-source">Ordnance Survey · free API key required</em>
+            </span>
+            <input
+              id="os-maps-toggle"
+              type="checkbox"
+              checked={osEnabled}
+              disabled={!osApiKey.trim()}
+              onChange={(event) => setOsEnabled(event.target.checked)}
+            />
+          </label>
+
+          <label>
+            <span>OS Data Hub API key</span>
+            <input
+              type="password"
+              placeholder="Paste your free OS API key…"
+              value={osApiKey}
+              autoComplete="off"
+              onChange={(event) => {
+                setOsApiKey(event.target.value)
+                setOsError(false)
+              }}
+            />
+          </label>
+
+          {!osApiKey.trim() && (
+            <p className="status">
+              Get a free key at{' '}
+              <a
+                href="https://osdatahub.os.uk/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                osdatahub.os.uk
+              </a>
+              {' '}→ API Dashboard → OS Maps API.
+            </p>
+          )}
+
           <label>
             <span>Highlight strength</span>
             <input
@@ -716,7 +883,7 @@ function App() {
               max={100}
               step={5}
               value={Math.round(footpathsOpacity * 100)}
-              disabled={!communityTrailsEnabled && !officialProwEnabled}
+              disabled={!communityTrailsEnabled && !officialProwEnabled && !osEnabled && !somersetProwEnabled}
               onChange={(event) =>
                 setFootpathsOpacity(Number(event.target.value) / 100)
               }
@@ -724,11 +891,13 @@ function App() {
           </label>
 
           <p className="status">
-            {!communityTrailsEnabled && !officialProwEnabled
-              ? 'Both layers off.'
+            {!communityTrailsEnabled && !officialProwEnabled && !osEnabled && !somersetProwEnabled
+              ? 'All layers off.'
               : [
+                  somersetProwEnabled && 'Somerset PRoW',
                   communityTrailsEnabled && 'community trails',
                   officialProwEnabled && 'official PRoW',
+                  osEnabled && 'OS Outdoor',
                 ]
                   .filter(Boolean)
                   .join(' + ')
@@ -740,6 +909,13 @@ function App() {
             <p className="status status--warning">
               Official PRoW source is currently unavailable (upstream server error).
               Try again later, or use Community trails for now.
+            </p>
+          )}
+
+          {osEnabled && osError && (
+            <p className="status status--warning">
+              OS Maps returned an error — check your API key is valid and the
+              OS Maps API is enabled in your OS Data Hub project.
             </p>
           )}
         </div>
@@ -758,6 +934,24 @@ function App() {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="card notes">
+          <p className="meta-label">Somerset data</p>
+          <p className="status">
+            Somerset Council publishes a definitive Rights of Way GIS bundle
+            (shapefile / GeoJSON) under the Open Government Licence, updated
+            March 2026.
+          </p>
+          <a
+            href="https://somersetcc.sharepoint.com/:u:/s/SCCPublic/EcSDZsLMPVBDgcszPfyjwUQBATozyF8hWIFkdU8fbQC7nA?e=QvJG7R"
+            target="_blank"
+            rel="noreferrer"
+            className="chip chip--secondary"
+            style={{ display: 'inline-block', textDecoration: 'none' }}
+          >
+            Download Somerset GIS bundle ↗
+          </a>
         </div>
 
         <div className="card notes">
