@@ -23,7 +23,7 @@ type StoredOsSettings = {
   osProjectApiSecret: string
   osZxyEndpoint: string
   osWmtsEndpoint: string
-  osEndpoint: 'zxy' | 'wmts'
+  osEndpoint: 'auto' | 'zxy' | 'wmts'
 }
 
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
@@ -481,8 +481,12 @@ function App() {
   const [osWmtsEndpoint, setOsWmtsEndpoint] = useState(
     storedOsSettings.osWmtsEndpoint ?? defaultOsWmtsEndpoint,
   )
-  const [osEndpoint, setOsEndpoint] = useState<'zxy' | 'wmts'>(
-    storedOsSettings.osEndpoint === 'wmts' ? 'wmts' : 'zxy',
+  const [osEndpoint, setOsEndpoint] = useState<'auto' | 'zxy' | 'wmts'>(
+    storedOsSettings.osEndpoint === 'wmts'
+      ? 'wmts'
+      : storedOsSettings.osEndpoint === 'auto'
+        ? 'auto'
+        : 'zxy',
   )
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
   const [officialProwError, setOfficialProwError] = useState(false)
@@ -493,6 +497,7 @@ function App() {
   const [osKeyTestRunning, setOsKeyTestRunning] = useState(false)
   const [osKeyTestSummary, setOsKeyTestSummary] = useState('')
   const [osEndpointAutoFixMessage, setOsEndpointAutoFixMessage] = useState('')
+  const [autoResolvedEndpoint, setAutoResolvedEndpoint] = useState<'wmts' | 'zxy'>('wmts')
 
   const activeOsApiKey = osProjectApiKey.trim()
 
@@ -611,6 +616,8 @@ function App() {
     if (!map || !osmBaseLayerRef.current) return
 
     if (baseMap === 'os' && activeOsApiKey.trim()) {
+      const resolvedEndpoint = osEndpoint === 'auto' ? autoResolvedEndpoint : osEndpoint
+
       // Rebuild OS layer when key changes to ensure stale URL/query params are dropped.
       if (osLayerRef.current) {
         if (map.hasLayer(osLayerRef.current)) map.removeLayer(osLayerRef.current)
@@ -620,12 +627,13 @@ function App() {
       const zxyBase = sanitizeOsZxyEndpointInput(osZxyEndpoint)
       const wmtsBase = sanitizeOsWmtsEndpointInput(osWmtsEndpoint)
       const url =
-        osEndpoint === 'zxy'
+        resolvedEndpoint === 'zxy'
           ? buildOsZxyTileTemplateUrl(zxyBase, activeOsApiKey.trim())
           : buildOsWmtsTileTemplateUrl(wmtsBase, activeOsApiKey.trim(), osRasterLayer)
 
       console.info('[OS Maps] Creating base layer', {
         endpoint: osEndpoint.toUpperCase(),
+        resolvedEndpoint: resolvedEndpoint.toUpperCase(),
         zxyEndpoint: zxyBase,
         wmtsEndpoint: wmtsBase,
         layer: osRasterLayer,
@@ -643,9 +651,19 @@ function App() {
 
       let firstTileLoadedLogged = false
       osLayerRef.current.on('tileerror', (event: unknown) => {
+        if (osEndpoint === 'auto' && resolvedEndpoint === 'wmts' && !firstTileLoadedLogged) {
+          console.warn('[OS Maps] Auto fallback triggered: WMTS failed, switching to ZXY', {
+            event,
+          })
+          setAutoResolvedEndpoint('zxy')
+          setOsEndpointAutoFixMessage('Auto mode switched from WMTS to ZXY after tile load failure.')
+          return
+        }
+
         setOsError(true)
         console.error('[OS Maps] Tile error', {
           endpoint: osEndpoint.toUpperCase(),
+          resolvedEndpoint: resolvedEndpoint.toUpperCase(),
           keyPreview: redactOsKey(activeOsApiKey),
           event,
         })
@@ -656,6 +674,7 @@ function App() {
           firstTileLoadedLogged = true
           console.info('[OS Maps] First tile loaded successfully', {
             endpoint: osEndpoint.toUpperCase(),
+            resolvedEndpoint: resolvedEndpoint.toUpperCase(),
           })
         }
       })
@@ -675,7 +694,7 @@ function App() {
     if (!map.hasLayer(osmBaseLayerRef.current)) {
       osmBaseLayerRef.current.addTo(map)
     }
-  }, [baseMap, activeOsApiKey, osEndpoint, osZxyEndpoint, osWmtsEndpoint, osRasterLayer])
+  }, [baseMap, activeOsApiKey, osEndpoint, autoResolvedEndpoint, osZxyEndpoint, osWmtsEndpoint, osRasterLayer])
 
   useEffect(() => {
     if (baseMap === 'os' && !activeOsApiKey.trim()) {
@@ -686,6 +705,12 @@ function App() {
   useEffect(() => {
     setOsKeyTestSummary('')
   }, [activeOsApiKey, osEndpoint])
+
+  useEffect(() => {
+    if (osEndpoint === 'auto') {
+      setAutoResolvedEndpoint('wmts')
+    }
+  }, [osEndpoint, activeOsApiKey, osRasterLayer, osWmtsEndpoint, osZxyEndpoint])
 
   const buildOsTileProbeUrl = (endpoint: 'zxy' | 'wmts', key: string) => {
     const z = 10
@@ -1335,10 +1360,11 @@ function App() {
             <select
               value={osEndpoint}
               onChange={(event) => {
-                setOsEndpoint(event.target.value as 'zxy' | 'wmts')
+                setOsEndpoint(event.target.value as 'auto' | 'zxy' | 'wmts')
                 setOsError(false)
               }}
             >
+              <option value="auto">Auto (prefer WMTS)</option>
               <option value="zxy">ZXY</option>
               <option value="wmts">WMTS</option>
             </select>
@@ -1357,7 +1383,7 @@ function App() {
 
           {activeOsApiKey && (
             <p className="status">
-              Using {osRasterLayer.replace('_3857', '')} with Project API Key ({redactOsKey(activeOsApiKey)}) via {osEndpoint.toUpperCase()}.
+              Using {osRasterLayer.replace('_3857', '')} with Project API Key ({redactOsKey(activeOsApiKey)}) via {osEndpoint === 'auto' ? `AUTO (resolved: ${autoResolvedEndpoint.toUpperCase()})` : osEndpoint.toUpperCase()}.
             </p>
           )}
 
@@ -1415,7 +1441,7 @@ function App() {
 
           {baseMap === 'os' && osError && (
             <p className="status status--warning">
-              OS Maps returned an error for {osEndpoint.toUpperCase()} — check key
+              OS Maps returned an error for {osEndpoint === 'auto' ? `AUTO (resolved: ${autoResolvedEndpoint.toUpperCase()})` : osEndpoint.toUpperCase()} — check key
               restrictions (referrer/origin), confirm OS Maps API is enabled for this key,
               and try ZXY first to validate the key.
             </p>
