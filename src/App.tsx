@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import L from 'leaflet'
 import './App.css'
 import {
@@ -324,6 +324,7 @@ function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const overlayRef = useRef<BritishGridOverlay | null>(null)
+  const osmBaseLayerRef = useRef<L.TileLayer | null>(null)
   const communityTrailsLayerRef = useRef<L.TileLayer | null>(null)
   const officialProwLayerRef = useRef<L.TileLayer.WMS | null>(null)
   const osLayerRef = useRef<L.TileLayer | null>(null)
@@ -350,13 +351,27 @@ function App() {
   const [printTitle, setPrintTitle] = useState(initialTitle)
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
-  const [osEnabled, setOsEnabled] = useState(false)
-  const [osApiKey, setOsApiKey] = useState('')
+  const [baseMap, setBaseMap] = useState<'osm' | 'os'>('osm')
+  const [osApiKeysInput, setOsApiKeysInput] = useState('')
+  const [selectedOsKeyIndex, setSelectedOsKeyIndex] = useState(0)
+  const [osEndpoint, setOsEndpoint] = useState<'zxy' | 'wmts'>('zxy')
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
   const [officialProwError, setOfficialProwError] = useState(false)
   const [osError, setOsError] = useState(false)
   const [somersetProwEnabled, setSomersetProwEnabled] = useState(false)
   const [somersetProwStatus, setSomersetProwStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [mapKeyOpen, setMapKeyOpen] = useState(true)
+
+  const osApiKeys = useMemo(
+    () =>
+      osApiKeysInput
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    [osApiKeysInput],
+  )
+
+  const activeOsApiKey = osApiKeys[selectedOsKeyIndex] ?? ''
 
   useEffect(() => {
     const map = mapRef.current
@@ -419,31 +434,59 @@ function App() {
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map) return
+    if (!map || !osmBaseLayerRef.current) return
 
-    // Remove stale OS layer whenever key or enabled state changes so we rebuild with the new key
-    if (osLayerRef.current) {
-      if (map.hasLayer(osLayerRef.current)) map.removeLayer(osLayerRef.current)
-      osLayerRef.current = null
+    if (baseMap === 'os' && activeOsApiKey.trim()) {
+      // Rebuild OS layer when key changes to ensure stale URL/query params are dropped.
+      if (osLayerRef.current) {
+        if (map.hasLayer(osLayerRef.current)) map.removeLayer(osLayerRef.current)
+        osLayerRef.current = null
+      }
+
+      const encodedKey = encodeURIComponent(activeOsApiKey.trim())
+      const url =
+        osEndpoint === 'zxy'
+          ? `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/{z}/{x}/{y}.png?key=${encodedKey}`
+          : `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
+
+      osLayerRef.current = L.tileLayer(
+        url,
+        {
+          maxZoom: 20,
+          attribution:
+            'Contains OS data &copy; <a href="https://www.ordnancesurvey.co.uk">Ordnance Survey</a>',
+        },
+      )
+
+      osLayerRef.current.on('tileerror', () => setOsError(true))
+      osLayerRef.current.on('tileload', () => setOsError(false))
+
+      if (map.hasLayer(osmBaseLayerRef.current)) {
+        map.removeLayer(osmBaseLayerRef.current)
+      }
+
+      osLayerRef.current.addTo(map)
+      return
     }
 
-    if (!osEnabled || !osApiKey.trim()) return
+    if (osLayerRef.current && map.hasLayer(osLayerRef.current)) {
+      map.removeLayer(osLayerRef.current)
+    }
 
-    osLayerRef.current = L.tileLayer(
-      `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/{z}/{x}/{y}.png?key=${encodeURIComponent(osApiKey.trim())}`,
-      {
-        maxZoom: 20,
-        opacity: footpathsOpacity,
-        pane: 'overlayPane',
-        attribution:
-          'Contains OS data &copy; <a href="https://www.ordnancesurvey.co.uk">Ordnance Survey</a>',
-      },
-    )
+    if (!map.hasLayer(osmBaseLayerRef.current)) {
+      osmBaseLayerRef.current.addTo(map)
+    }
+  }, [baseMap, activeOsApiKey, osEndpoint])
 
-    osLayerRef.current.on('tileerror', () => setOsError(true))
-    osLayerRef.current.on('tileload', () => setOsError(false))
-    osLayerRef.current.addTo(map)
-  }, [osEnabled, osApiKey, footpathsOpacity])
+  useEffect(() => {
+    if (selectedOsKeyIndex >= osApiKeys.length) {
+      setSelectedOsKeyIndex(osApiKeys.length > 0 ? osApiKeys.length - 1 : 0)
+    }
+
+    if (baseMap === 'os' && osApiKeys.length === 0) {
+      setBaseMap('osm')
+    }
+  }, [selectedOsKeyIndex, osApiKeys.length, baseMap])
 
   const prowColour = (status: string | null) => {
     switch ((status ?? '').toLowerCase()) {
@@ -548,11 +591,12 @@ function App() {
     mapRef.current = map
 
     L.control.zoom({ position: 'bottomright' }).addTo(map)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    osmBaseLayerRef.current = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 18,
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map)
+    })
+    osmBaseLayerRef.current.addTo(map)
 
     const overlay = new BritishGridOverlay()
     const initialSpacing =
@@ -626,6 +670,8 @@ function App() {
       communityTrailsLayerRef.current = null
       officialProwLayerRef.current?.remove()
       officialProwLayerRef.current = null
+      osmBaseLayerRef.current?.remove()
+      osmBaseLayerRef.current = null
       osLayerRef.current?.remove()
       osLayerRef.current = null
       somersetProwLayerRef.current?.remove()
@@ -800,17 +846,6 @@ function App() {
             />
           </label>
 
-          <p className="status">
-            Download source data:{' '}
-            <a
-              href="https://somersetcc.sharepoint.com/:u:/s/SCCPublic/EcSDZsLMPVBDgcszPfyjwUQBATozyF8hWIFkdU8fbQC7nA?e=QvJG7R"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Somerset Rights of Way GIS files
-            </a>
-          </p>
-
           {somersetProwEnabled && somersetProwStatus !== 'idle' && (
             <p className="status">
               {somersetProwStatus === 'loading' && 'Loading Somerset PRoW data…'}
@@ -858,35 +893,83 @@ function App() {
 
           <label className="toggle-row" htmlFor="os-maps-toggle">
             <span>
-              OS Outdoor map
-              <em className="layer-source">Ordnance Survey · free API key required</em>
+              Basemap
+              <em className="layer-source">Choose OpenStreetMap or OS Outdoor</em>
             </span>
-            <input
+            <select
               id="os-maps-toggle"
-              type="checkbox"
-              checked={osEnabled}
-              disabled={!osApiKey.trim()}
-              onChange={(event) => setOsEnabled(event.target.checked)}
-            />
+              value={baseMap}
+              onChange={(event) => {
+                const nextBaseMap = event.target.value as 'osm' | 'os'
+                if (nextBaseMap === 'os' && !activeOsApiKey.trim()) {
+                  setOsError(false)
+                  return
+                }
+                setBaseMap(nextBaseMap)
+                setOsError(false)
+              }}
+            >
+              <option value="osm">OpenStreetMap</option>
+              <option value="os" disabled={!activeOsApiKey.trim()}>OS Outdoor</option>
+            </select>
           </label>
 
           <label>
-            <span>OS Data Hub API key</span>
-            <input
-              type="password"
-              placeholder="Paste your free OS API key…"
-              value={osApiKey}
+            <span>OS Data Hub API keys (one per line)</span>
+            <textarea
+              placeholder="Paste one key per line…"
+              value={osApiKeysInput}
               autoComplete="off"
+              rows={3}
               onChange={(event) => {
-                setOsApiKey(event.target.value)
+                setOsApiKeysInput(event.target.value)
                 setOsError(false)
               }}
             />
           </label>
 
-          {!osApiKey.trim() && (
+          {osApiKeys.length > 1 && (
+            <label>
+              <span>Active OS key</span>
+              <select
+                value={String(selectedOsKeyIndex)}
+                onChange={(event) => {
+                  setSelectedOsKeyIndex(Number(event.target.value))
+                  setOsError(false)
+                }}
+              >
+                {osApiKeys.map((key, index) => (
+                  <option key={index} value={String(index)}>
+                    Key {index + 1} ({key.slice(0, 6)}...{key.slice(-4)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label>
+            <span>OS endpoint</span>
+            <select
+              value={osEndpoint}
+              onChange={(event) => {
+                setOsEndpoint(event.target.value as 'zxy' | 'wmts')
+                setOsError(false)
+              }}
+            >
+              <option value="zxy">ZXY</option>
+              <option value="wmts">WMTS</option>
+            </select>
+          </label>
+
+          {activeOsApiKey && (
             <p className="status">
-              Get a free key at{' '}
+              Using key {selectedOsKeyIndex + 1} with {osEndpoint.toUpperCase()} endpoint.
+            </p>
+          )}
+
+          {!activeOsApiKey.trim() && (
+            <p className="status">
+              Add at least one key from{' '}
               <a
                 href="https://osdatahub.os.uk/"
                 target="_blank"
@@ -894,7 +977,7 @@ function App() {
               >
                 osdatahub.os.uk
               </a>
-              {' '}→ API Dashboard → OS Maps API.
+              {' '}→ API Dashboard.
             </p>
           )}
 
@@ -906,7 +989,7 @@ function App() {
               max={100}
               step={5}
               value={Math.round(footpathsOpacity * 100)}
-              disabled={!communityTrailsEnabled && !officialProwEnabled && !osEnabled && !somersetProwEnabled}
+              disabled={!communityTrailsEnabled && !officialProwEnabled && !somersetProwEnabled}
               onChange={(event) =>
                 setFootpathsOpacity(Number(event.target.value) / 100)
               }
@@ -914,13 +997,12 @@ function App() {
           </label>
 
           <p className="status">
-            {!communityTrailsEnabled && !officialProwEnabled && !osEnabled && !somersetProwEnabled
+            {!communityTrailsEnabled && !officialProwEnabled && !somersetProwEnabled
               ? 'All layers off.'
               : [
                   somersetProwEnabled && 'Somerset PRoW',
                   communityTrailsEnabled && 'community trails',
                   officialProwEnabled && 'official PRoW',
-                  osEnabled && 'OS Outdoor',
                 ]
                   .filter(Boolean)
                   .join(' + ')
@@ -935,10 +1017,10 @@ function App() {
             </p>
           )}
 
-          {osEnabled && osError && (
+          {baseMap === 'os' && osError && (
             <p className="status status--warning">
               OS Maps returned an error — check your API key is valid and the
-              OS Maps API is enabled in your OS Data Hub project.
+              OS Maps API is enabled for the selected key and endpoint.
             </p>
           )}
         </div>
@@ -1018,12 +1100,51 @@ function App() {
             </h2>
           </div>
           <p className="map-caption">
-            Tiles from OpenStreetMap, overlaid with the UK National Grid.
+            Tiles from {baseMap === 'os' ? 'Ordnance Survey' : 'OpenStreetMap'}, overlaid with the UK National Grid.
           </p>
         </header>
 
         <section className="map-frame">
           <div ref={mapContainerRef} className="map" aria-label="Printable map area" />
+
+          {/* Collapsible map key — only shown when at least one overlay is active */}
+          {(communityTrailsEnabled || officialProwEnabled || (somersetProwEnabled && somersetProwStatus === 'ready')) && (
+            <div className={`map-key${mapKeyOpen ? ' map-key--open' : ''}`}>
+              <button
+                className="map-key__toggle"
+                onClick={() => setMapKeyOpen(o => !o)}
+                aria-expanded={mapKeyOpen}
+                aria-label={mapKeyOpen ? 'Collapse map key' : 'Expand map key'}
+              >
+                Key {mapKeyOpen ? '▾' : '▸'}
+              </button>
+
+              {mapKeyOpen && (
+                <ul className="map-key__list">
+                  {communityTrailsEnabled && (
+                    <li>
+                      <span className="map-key__swatch" style={{ background: 'rgba(255,140,0,0.85)' }} />
+                      Community trails
+                    </li>
+                  )}
+                  {officialProwEnabled && (
+                    <li>
+                      <span className="map-key__swatch" style={{ background: 'rgba(0,128,64,0.85)' }} />
+                      Official footpaths (OS)
+                    </li>
+                  )}
+                  {somersetProwEnabled && somersetProwStatus === 'ready' && (
+                    <>
+                      <li><span className="map-key__swatch" style={{ background: '#1b7c3c' }} />Somerset footpath</li>
+                      <li><span className="map-key__swatch" style={{ background: '#c96a00' }} />Somerset bridleway</li>
+                      <li><span className="map-key__swatch" style={{ background: '#7b3fa0' }} />Restricted byway</li>
+                      <li><span className="map-key__swatch" style={{ background: '#b71c1c' }} />Byway (all traffic)</li>
+                    </>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
         </section>
       </main>
     </div>

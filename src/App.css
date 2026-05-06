@@ -389,6 +389,73 @@
   height: 100%;
 }
 
+/* ── Collapsible map key overlay ───────────────────────────────────── */
+.map-key {
+  position: absolute;
+  bottom: 1.25rem;
+  left: 1rem;
+  z-index: 1000;
+  background: rgba(252, 248, 238, 0.93);
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(83, 75, 56, 0.25);
+  border-radius: 0.6rem;
+  box-shadow: 0 2px 8px rgba(60, 45, 15, 0.18);
+  min-width: 8.5rem;
+  max-width: 16rem;
+  font-size: 0.8rem;
+}
+
+.map-key__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  width: 100%;
+  padding: 0.4rem 0.65rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #3b2f14;
+  border-radius: 0.6rem;
+  text-align: left;
+}
+
+.map-key__toggle:hover {
+  background: rgba(200, 170, 90, 0.18);
+}
+
+.map-key__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.65rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.map-key__list li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #3b2f14;
+}
+
+.map-key__swatch {
+  display: inline-block;
+  width: 1.5rem;
+  height: 0.35rem;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+@media print {
+  .map-key {
+    display: none;
+  }
+}
+/* ── end map key ────────────────────────────────────────────────────── */
+
 /* Prevent antialias seam artifacts between raster map tiles. */
 .map .leaflet-tile {
   outline: 1px solid transparent;
