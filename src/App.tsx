@@ -426,6 +426,13 @@ function App() {
   const activeOsApiKeyEntry = osApiKeys[selectedOsKeyIndex] ?? null
   const activeOsApiKey = activeOsApiKeyEntry?.key ?? ''
 
+  const redactOsKey = (key: string) => {
+    const trimmed = key.trim()
+    if (!trimmed) return '(empty)'
+    if (trimmed.length <= 10) return `${trimmed.slice(0, 2)}...${trimmed.slice(-2)}`
+    return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
+  }
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return
@@ -521,6 +528,12 @@ function App() {
           ? `https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857/{z}/{x}/{y}.png?key=${encodedKey}`
           : `https://api.os.uk/maps/raster/v1/wmts?key=${encodedKey}&SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=Outdoor_3857&STYLE=default&TILEMATRIXSET=EPSG:3857&TILEMATRIX=EPSG:3857:{z}&TILEROW={y}&TILECOL={x}&FORMAT=image/png`
 
+      console.info('[OS Maps] Creating base layer', {
+        endpoint: osEndpoint.toUpperCase(),
+        activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
+        keyPreview: redactOsKey(activeOsApiKey),
+      })
+
       osLayerRef.current = L.tileLayer(
         url,
         {
@@ -530,8 +543,26 @@ function App() {
         },
       )
 
-      osLayerRef.current.on('tileerror', () => setOsError(true))
-      osLayerRef.current.on('tileload', () => setOsError(false))
+      let firstTileLoadedLogged = false
+      osLayerRef.current.on('tileerror', (event: unknown) => {
+        setOsError(true)
+        console.error('[OS Maps] Tile error', {
+          endpoint: osEndpoint.toUpperCase(),
+          activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
+          keyPreview: redactOsKey(activeOsApiKey),
+          event,
+        })
+      })
+      osLayerRef.current.on('tileload', () => {
+        setOsError(false)
+        if (!firstTileLoadedLogged) {
+          firstTileLoadedLogged = true
+          console.info('[OS Maps] First tile loaded successfully', {
+            endpoint: osEndpoint.toUpperCase(),
+            activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
+          })
+        }
+      })
 
       if (map.hasLayer(osmBaseLayerRef.current)) {
         map.removeLayer(osmBaseLayerRef.current)
@@ -586,11 +617,32 @@ function App() {
     setOsKeyTestRunning(true)
     setOsKeyTestSummary('Testing selected key against ZXY and WMTS...')
 
+    console.info('[OS Maps] Starting key probe', {
+      activeKeyLabel: activeOsApiKeyEntry?.label ?? `Key ${selectedOsKeyIndex + 1}`,
+      keyPreview: redactOsKey(key),
+      origin: typeof window !== 'undefined' ? window.location.origin : 'unknown',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+    })
+
     const testEndpoint = async (endpoint: 'zxy' | 'wmts') => {
       const url = buildOsTileProbeUrl(endpoint, key)
+      const safeUrl = url.replace(/key=[^&]+/, `key=${encodeURIComponent(redactOsKey(key))}`)
+
+      console.info('[OS Maps] Probing endpoint', {
+        endpoint: endpoint.toUpperCase(),
+        url: safeUrl,
+      })
 
       try {
         const response = await fetch(url, { method: 'GET' })
+        console.info('[OS Maps] Probe response', {
+          endpoint: endpoint.toUpperCase(),
+          ok: response.ok,
+          status: response.status,
+          statusText: response.statusText,
+          type: response.type,
+          redirected: response.redirected,
+        })
         return {
           endpoint,
           ok: response.ok,
@@ -598,6 +650,11 @@ function App() {
         }
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Network/CORS error'
+        console.error('[OS Maps] Probe failed', {
+          endpoint: endpoint.toUpperCase(),
+          error,
+          message,
+        })
         return {
           endpoint,
           ok: false,
@@ -612,6 +669,11 @@ function App() {
     ])
 
     const summary = `ZXY: ${zxyResult.detail} | WMTS: ${wmtsResult.detail}`
+    console.info('[OS Maps] Probe summary', {
+      summary,
+      zxy: zxyResult,
+      wmts: wmtsResult,
+    })
     setOsKeyTestSummary(summary)
     setOsKeyTestRunning(false)
   }
