@@ -1,13 +1,13 @@
 {
   "_comment": "Local app-specific Pelican egg for map-grid",
   "meta": {
-    "version": "PLCN_v3",
+    "version": "PTDL_v2",
     "update_url": "https://raw.githubusercontent.com/counterfitninja/map-grid/main/pelican/egg-map-grid-nodejs.json"
   },
   "exported_at": "2026-04-23T00:00:00+00:00",
   "name": "map-grid node.js",
   "author": "dave.bird@outlook.com",
-  "uuid": "1f9b8a1d-88bb-4f13-b992-266841d0ffa0",
+  "uuid": "0e8f40e4-5b29-4d73-8dde-a237f9b7313c",
   "description": "Pelican egg for the map-grid Vite app.\n\nClones the repository, installs dependencies, builds the frontend, and serves the generated dist output through server.mjs.",
   "tags": [
     "nodejs",
@@ -50,7 +50,7 @@
         "string",
         "max:64"
       ],
-      "sort": null
+      "sort": 1
     },
     {
       "name": "Additional Node packages",
@@ -63,7 +63,7 @@
         "nullable",
         "string"
       ],
-      "sort": null
+      "sort": 2
     },
     {
       "name": "Auto Update",
@@ -76,7 +76,7 @@
         "required",
         "boolean"
       ],
-      "sort": null
+      "sort": 3
     },
     {
       "name": "Git Access Token",
@@ -89,7 +89,7 @@
         "nullable",
         "string"
       ],
-      "sort": null
+      "sort": 4
     },
     {
       "name": "Git Repo Address",
@@ -102,7 +102,7 @@
         "nullable",
         "string"
       ],
-      "sort": null
+      "sort": 5
     },
     {
       "name": "Git Username",
@@ -115,7 +115,7 @@
         "nullable",
         "string"
       ],
-      "sort": null
+      "sort": 6
     },
     {
       "name": "Install Branch",
@@ -128,7 +128,7 @@
         "nullable",
         "string"
       ],
-      "sort": null
+      "sort": 7
     },
     {
       "name": "Main file",
@@ -142,7 +142,7 @@
         "string",
         "max:32"
       ],
-      "sort": null
+      "sort": 8
     },
     {
       "name": "Uninstall Node packages",
@@ -155,7 +155,7 @@
         "nullable",
         "string"
       ],
-      "sort": null
+      "sort": 9
     },
     {
       "name": "User Uploaded Files",
@@ -168,7 +168,7 @@
         "required",
         "boolean"
       ],
-      "sort": null
+      "sort": 10
     }
   ]
 }
