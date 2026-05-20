@@ -1,0 +1,33 @@
+!table
+!version 500
+!charset WindowsLatin1
+
+Definition Table
+  Type NATIVE Charset "WindowsLatin1"
+  Fields 15
+    PROW_REF Char (10) ;
+    TYPE Decimal (14, 0) ;
+    STATUS Char (4) ;
+    LENGTH Decimal (14, 0) ;
+    DIRECTION Char (3) ;
+    LEAVES_METALLED_ROAD Char (1) ;
+    QTY_LMN Decimal (14, 0) ;
+    BS_COMPLIANT Char (10) ;
+    STARTEAST Decimal (14, 0) ;
+    STARTNORTH Decimal (14, 0) ;
+    ENDEAST Decimal (14, 0) ;
+    ENDNORTH Decimal (14, 0) ;
+    PAI_CHECKED Char (1) ;
+    ALTERED_FOR_PAI Char (1) ;
+    MI_PRINX Decimal (12, 0) ;
+begin_metadata
+"\IsReadOnly" = "FALSE"
+"\DATALINK" = ""
+"\DATALINK\Query" = "select * from ""MAPDATA"".""PROWWHOLEROUTE"""
+"\DATALINK\ConnectionString" = "SRVR=ismsdw;UID=mapdata"
+"\DATALINK\ToolKit" = "ORAINET"
+"\CACHE" = "ON"
+"\MBRSEARCH" = "ON"
+"\MapInfo" = ""
+"\MapInfo\TableID" = "64653a24-3365-477a-a590-c1372c49177b"
+end_metadata

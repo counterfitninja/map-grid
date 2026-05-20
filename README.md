@@ -30,6 +30,29 @@ Create a production build:
 npm run build
 ```
 
+Convert local definitive PRoW shapefiles to GeoJSON overlays:
+
+```bash
+npm run convert:prow
+```
+
+The converter writes these files to public/ when source data is present:
+
+- somerset-prow.geojson
+- wiltshire-prow.geojson
+- banes-prow.geojson
+
+Expected source locations:
+
+- Existing Somerset files in Rights of Way GIS files/ (Paths_Mar26_polyline.*)
+- Wiltshire files in Rights of Way GIS files/Wiltshire Definitive PRoW/
+- Bath and North East Somerset files in Rights of Way GIS files/Bath and North East Somerset PRoW/
+
+Wiltshire should contain one shapefile set (.shp/.dbf/.shx) in its folder.
+BANES can contain either MapInfo TAB files or a shapefile set; the converter
+will try TAB conversion first and fall back to the published GeoJSON feeds if
+local TAB geometry cannot be decoded.
+
 Start the production server locally:
 
 ```bash

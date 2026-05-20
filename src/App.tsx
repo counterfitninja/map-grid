@@ -16,6 +16,60 @@ type OverlayState = {
   digits: GridDigits
 }
 
+type LocalProwLayerId = 'somerset' | 'wiltshire' | 'banes'
+
+type LocalProwLayerConfig = {
+  id: LocalProwLayerId
+  label: string
+  source: string
+  dataPath: string
+  keyPrefix: string
+}
+
+type LocalProwStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+const localProwLayerConfigs: LocalProwLayerConfig[] = [
+  {
+    id: 'somerset',
+    label: 'Somerset definitive PRoW',
+    source: 'Somerset Council GIS · OGL',
+    dataPath: '/somerset-prow.geojson',
+    keyPrefix: 'Somerset',
+  },
+  {
+    id: 'wiltshire',
+    label: 'Wiltshire definitive PRoW',
+    source: 'Wiltshire Council GIS',
+    dataPath: '/wiltshire-prow.geojson',
+    keyPrefix: 'Wiltshire',
+  },
+  {
+    id: 'banes',
+    label: 'Bath and North East Somerset PRoW',
+    source: 'Bath and North East Somerset Council GIS',
+    dataPath: '/banes-prow.geojson',
+    keyPrefix: 'B&NES',
+  },
+]
+
+const defaultLocalProwEnabled: Record<LocalProwLayerId, boolean> = {
+  somerset: false,
+  wiltshire: false,
+  banes: false,
+}
+
+const defaultLocalProwStatus: Record<LocalProwLayerId, LocalProwStatus> = {
+  somerset: 'idle',
+  wiltshire: 'idle',
+  banes: 'idle',
+}
+
+const defaultLocalProwFeatureCount: Record<LocalProwLayerId, number> = {
+  somerset: 0,
+  wiltshire: 0,
+  banes: 0,
+}
+
 type StoredOsSettings = {
   baseMap: 'osm' | 'os'
   osRasterLayer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857'
@@ -434,7 +488,16 @@ function App() {
   const communityTrailsLayerRef = useRef<L.TileLayer | null>(null)
   const officialProwLayerRef = useRef<L.TileLayer.WMS | null>(null)
   const osLayerRef = useRef<L.TileLayer | null>(null)
-  const somersetProwLayerRef = useRef<L.GeoJSON | null>(null)
+  const localProwLayerRefs = useRef<Record<LocalProwLayerId, L.GeoJSON | null>>({
+    somerset: null,
+    wiltshire: null,
+    banes: null,
+  })
+  const localProwLoadInFlightRef = useRef<Record<LocalProwLayerId, boolean>>({
+    somerset: false,
+    wiltshire: false,
+    banes: false,
+  })
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({
@@ -491,13 +554,15 @@ function App() {
   const [footpathsOpacity, setFootpathsOpacity] = useState(0.82)
   const [officialProwError, setOfficialProwError] = useState(false)
   const [osError, setOsError] = useState(false)
-  const [somersetProwEnabled, setSomersetProwEnabled] = useState(false)
-  const [somersetProwStatus, setSomersetProwStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [localProwEnabled, setLocalProwEnabled] = useState<Record<LocalProwLayerId, boolean>>(defaultLocalProwEnabled)
+  const [localProwStatus, setLocalProwStatus] = useState<Record<LocalProwLayerId, LocalProwStatus>>(defaultLocalProwStatus)
+  const [localProwFeatureCount, setLocalProwFeatureCount] = useState<Record<LocalProwLayerId, number>>(defaultLocalProwFeatureCount)
   const [mapKeyOpen, setMapKeyOpen] = useState(true)
   const [osKeyTestRunning, setOsKeyTestRunning] = useState(false)
   const [osKeyTestSummary, setOsKeyTestSummary] = useState('')
   const [osEndpointAutoFixMessage, setOsEndpointAutoFixMessage] = useState('')
   const [autoResolvedEndpoint, setAutoResolvedEndpoint] = useState<'wmts' | 'zxy'>('wmts')
+  const localProwEnabledRef = useRef(localProwEnabled)
 
   const activeOsApiKey = osProjectApiKey.trim()
 
@@ -506,6 +571,35 @@ function App() {
     if (!trimmed) return '(empty)'
     if (trimmed.length <= 10) return `${trimmed.slice(0, 2)}...${trimmed.slice(-2)}`
     return `${trimmed.slice(0, 6)}...${trimmed.slice(-4)}`
+  }
+
+  useEffect(() => {
+    localProwEnabledRef.current = localProwEnabled
+  }, [localProwEnabled])
+
+  const getLocalProwStatus = (properties: Record<string, unknown> | undefined) => {
+    if (!properties) return null
+
+    const fields = [
+      'status',
+      'LINKSTATUS',
+      'linkstatus',
+      'designation',
+      'DESIGNATION',
+      'row_type',
+      'ROW_TYPE',
+      'TYPE',
+      'type',
+    ]
+
+    for (const field of fields) {
+      const value = properties[field]
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim()
+      }
+    }
+
+    return null
   }
 
   useEffect(() => {
@@ -843,53 +937,74 @@ function App() {
     const map = mapRef.current
     if (!map) return
 
-    if (!somersetProwEnabled) {
-      if (somersetProwLayerRef.current && map.hasLayer(somersetProwLayerRef.current)) {
-        map.removeLayer(somersetProwLayerRef.current)
-        console.info('[Somerset PRoW] Layer removed from map.')
-      }
-      return
-    }
+    for (const config of localProwLayerConfigs) {
+      const enabled = localProwEnabled[config.id]
+      const cachedLayer = localProwLayerRefs.current[config.id]
 
-    // Already loaded — just re-add and re-apply opacity
-    if (somersetProwLayerRef.current) {
-      if (!map.hasLayer(somersetProwLayerRef.current)) {
-        somersetProwLayerRef.current.addTo(map)
-        console.info('[Somerset PRoW] Reusing cached layer and adding to map.')
+      if (!enabled) {
+        if (cachedLayer && map.hasLayer(cachedLayer)) {
+          map.removeLayer(cachedLayer)
+          console.info(`[${config.label}] Layer removed from map.`)
+        }
+        continue
       }
-      somersetProwLayerRef.current.setStyle({ opacity: footpathsOpacity })
-      return
-    }
 
-    console.info('[Somerset PRoW] Loading /somerset-prow.geojson ...')
-    setSomersetProwStatus('loading')
-    fetch('/somerset-prow.geojson')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        return r.json()
-      })
-      .then((data) => {
-        if (!mapRef.current) return
-        const featureCount = Array.isArray(data?.features) ? data.features.length : 0
-        somersetProwLayerRef.current = L.geoJSON(data, {
-          style: (feature) => ({
-            color: prowColour(feature?.properties?.status ?? null),
-            weight: 2,
-            opacity: footpathsOpacity,
-          }),
-          pane: 'overlayPane',
+      if (cachedLayer) {
+        if (!map.hasLayer(cachedLayer)) {
+          cachedLayer.addTo(map)
+          console.info(`[${config.label}] Reusing cached layer and adding to map.`)
+        }
+        cachedLayer.setStyle({ opacity: footpathsOpacity })
+        continue
+      }
+
+      if (localProwLoadInFlightRef.current[config.id]) {
+        continue
+      }
+
+      localProwLoadInFlightRef.current[config.id] = true
+      setLocalProwStatus((current) => ({ ...current, [config.id]: 'loading' }))
+      console.info(`[${config.label}] Loading ${config.dataPath} ...`)
+
+      fetch(config.dataPath)
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          return r.json()
         })
-        somersetProwLayerRef.current.addTo(mapRef.current)
-        setSomersetProwStatus('ready')
-        console.info(`[Somerset PRoW] Loaded ${featureCount} features.`)
-      })
-      .catch((error: unknown) => {
-        setSomersetProwStatus('error')
-        console.error('[Somerset PRoW] Failed to load GeoJSON.', error)
-      })
-  // prowColour is stable (defined outside effect deps), footpathsOpacity triggers style refresh
+        .then((data) => {
+          if (!mapRef.current) return
+
+          const featureCount = Array.isArray(data?.features) ? data.features.length : 0
+          const nextLayer = L.geoJSON(data, {
+            style: (feature) => ({
+              color: prowColour(getLocalProwStatus(feature?.properties ?? undefined)),
+              weight: 2,
+              opacity: footpathsOpacity,
+            }),
+            pane: 'overlayPane',
+          })
+
+          localProwLayerRefs.current[config.id] = nextLayer
+          setLocalProwFeatureCount((current) => ({ ...current, [config.id]: featureCount }))
+          setLocalProwStatus((current) => ({ ...current, [config.id]: 'ready' }))
+
+          if (localProwEnabledRef.current[config.id]) {
+            nextLayer.addTo(mapRef.current)
+          }
+
+          console.info(`[${config.label}] Loaded ${featureCount} features.`)
+        })
+        .catch((error: unknown) => {
+          setLocalProwStatus((current) => ({ ...current, [config.id]: 'error' }))
+          console.error(`[${config.label}] Failed to load GeoJSON.`, error)
+        })
+        .finally(() => {
+          localProwLoadInFlightRef.current[config.id] = false
+        })
+    }
+  // prowColour and getLocalProwStatus are stable for this use and footpathsOpacity should refresh style.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [somersetProwEnabled, footpathsOpacity])
+  }, [localProwEnabled, footpathsOpacity])
 
   useEffect(() => {
     overlayStateRef.current = overlayState
@@ -1015,8 +1130,10 @@ function App() {
       osmBaseLayerRef.current = null
       osLayerRef.current?.remove()
       osLayerRef.current = null
-      somersetProwLayerRef.current?.remove()
-      somersetProwLayerRef.current = null
+      for (const config of localProwLayerConfigs) {
+        localProwLayerRefs.current[config.id]?.remove()
+        localProwLayerRefs.current[config.id] = null
+      }
       overlay.remove()
       overlayRef.current = null
       map.remove()
@@ -1174,30 +1291,40 @@ function App() {
         <div className="card">
           <p className="meta-label">Trail overlays</p>
 
-          <label className="toggle-row" htmlFor="somerset-prow-toggle">
-            <span>
-              Somerset definitive PRoW
-              <em className="layer-source">Somerset Council · March 2026 · OGL</em>
-            </span>
-            <input
-              id="somerset-prow-toggle"
-              type="checkbox"
-              checked={somersetProwEnabled}
-              onChange={(event) => setSomersetProwEnabled(event.target.checked)}
-            />
-          </label>
+          {localProwLayerConfigs.map((layerConfig) => (
+            <div key={layerConfig.id}>
+              <label className="toggle-row" htmlFor={`${layerConfig.id}-prow-toggle`}>
+                <span>
+                  {layerConfig.label}
+                  <em className="layer-source">{layerConfig.source}</em>
+                </span>
+                <input
+                  id={`${layerConfig.id}-prow-toggle`}
+                  type="checkbox"
+                  checked={localProwEnabled[layerConfig.id]}
+                  onChange={(event) => {
+                    const checked = event.target.checked
+                    setLocalProwEnabled((current) => ({
+                      ...current,
+                      [layerConfig.id]: checked,
+                    }))
+                  }}
+                />
+              </label>
 
-          {somersetProwEnabled && somersetProwStatus !== 'idle' && (
-            <p className="status">
-              {somersetProwStatus === 'loading' && 'Loading Somerset PRoW data…'}
-              {somersetProwStatus === 'ready' && '16,658 paths loaded.'}
-              {somersetProwStatus === 'error' && (
-                <span className="status--warning">Failed to load Somerset PRoW data.</span>
+              {localProwEnabled[layerConfig.id] && localProwStatus[layerConfig.id] !== 'idle' && (
+                <p className="status">
+                  {localProwStatus[layerConfig.id] === 'loading' && `Loading ${layerConfig.label} data...`}
+                  {localProwStatus[layerConfig.id] === 'ready' && `${localProwFeatureCount[layerConfig.id].toLocaleString()} paths loaded.`}
+                  {localProwStatus[layerConfig.id] === 'error' && (
+                    <span className="status--warning">Failed to load {layerConfig.label} data.</span>
+                  )}
+                </p>
               )}
-            </p>
-          )}
+            </div>
+          ))}
 
-          {somersetProwEnabled && somersetProwStatus === 'ready' && (
+          {localProwLayerConfigs.some((layerConfig) => localProwEnabled[layerConfig.id] && localProwStatus[layerConfig.id] === 'ready') && (
             <ul className="prow-legend">
               <li><span className="prow-swatch" style={{ background: '#1b7c3c' }} />Footpath</li>
               <li><span className="prow-swatch" style={{ background: '#c96a00' }} />Bridleway</li>
@@ -1411,7 +1538,7 @@ function App() {
               max={100}
               step={5}
               value={Math.round(footpathsOpacity * 100)}
-              disabled={!communityTrailsEnabled && !officialProwEnabled && !somersetProwEnabled}
+              disabled={!communityTrailsEnabled && !officialProwEnabled && !Object.values(localProwEnabled).some(Boolean)}
               onChange={(event) =>
                 setFootpathsOpacity(Number(event.target.value) / 100)
               }
@@ -1419,10 +1546,12 @@ function App() {
           </label>
 
           <p className="status">
-            {!communityTrailsEnabled && !officialProwEnabled && !somersetProwEnabled
+            {!communityTrailsEnabled && !officialProwEnabled && !Object.values(localProwEnabled).some(Boolean)
               ? 'All layers off.'
               : [
-                  somersetProwEnabled && 'Somerset PRoW',
+                  ...localProwLayerConfigs
+                    .filter((layerConfig) => localProwEnabled[layerConfig.id])
+                    .map((layerConfig) => layerConfig.label),
                   communityTrailsEnabled && 'community trails',
                   officialProwEnabled && 'official PRoW',
                 ]
@@ -1465,21 +1594,17 @@ function App() {
         </div>
 
         <div className="card notes">
-          <p className="meta-label">Somerset data</p>
+          <p className="meta-label">Definitive PRoW data</p>
           <p className="status">
-            Somerset Council publishes a definitive Rights of Way GIS bundle
-            (shapefile / GeoJSON) under the Open Government Licence, updated
-            March 2026.
+            Load local GeoJSON files in public/ named somerset-prow.geojson,
+            wiltshire-prow.geojson, and banes-prow.geojson. Use the converter
+            script to regenerate from shapefiles when source bundles change.
           </p>
-          <a
-            href="https://somersetcc.sharepoint.com/:u:/s/SCCPublic/EcSDZsLMPVBDgcszPfyjwUQBATozyF8hWIFkdU8fbQC7nA?e=QvJG7R"
-            target="_blank"
-            rel="noreferrer"
-            className="chip chip--secondary"
-            style={{ display: 'inline-block', textDecoration: 'none' }}
-          >
-            Download Somerset GIS bundle ↗
-          </a>
+          <p className="status">
+            Somerset source folder is already wired. Add Wiltshire and Bath and
+            North East Somerset shapefiles into their matching source folders
+            under Rights of Way GIS files before running conversion.
+          </p>
         </div>
 
         <div className="card notes">
@@ -1531,7 +1656,7 @@ function App() {
           <div ref={mapContainerRef} className="map" aria-label="Printable map area" />
 
           {/* Collapsible map key — only shown when at least one overlay is active */}
-          {(communityTrailsEnabled || officialProwEnabled || (somersetProwEnabled && somersetProwStatus === 'ready')) && (
+          {(communityTrailsEnabled || officialProwEnabled || localProwLayerConfigs.some((layerConfig) => localProwEnabled[layerConfig.id] && localProwStatus[layerConfig.id] === 'ready')) && (
             <div className={`map-key${mapKeyOpen ? ' map-key--open' : ''}`}>
               <button
                 className="map-key__toggle"
@@ -1556,14 +1681,14 @@ function App() {
                       Official footpaths (OS)
                     </li>
                   )}
-                  {somersetProwEnabled && somersetProwStatus === 'ready' && (
-                    <>
-                      <li><span className="map-key__swatch" style={{ background: '#1b7c3c' }} />Somerset footpath</li>
-                      <li><span className="map-key__swatch" style={{ background: '#c96a00' }} />Somerset bridleway</li>
-                      <li><span className="map-key__swatch" style={{ background: '#7b3fa0' }} />Restricted byway</li>
-                      <li><span className="map-key__swatch" style={{ background: '#b71c1c' }} />Byway (all traffic)</li>
-                    </>
-                  )}
+                  {localProwLayerConfigs
+                    .filter((layerConfig) => localProwEnabled[layerConfig.id] && localProwStatus[layerConfig.id] === 'ready')
+                    .flatMap((layerConfig) => [
+                      <li key={`${layerConfig.id}-footpath`}><span className="map-key__swatch" style={{ background: '#1b7c3c' }} />{layerConfig.keyPrefix} footpath</li>,
+                      <li key={`${layerConfig.id}-bridleway`}><span className="map-key__swatch" style={{ background: '#c96a00' }} />{layerConfig.keyPrefix} bridleway</li>,
+                      <li key={`${layerConfig.id}-restricted`}><span className="map-key__swatch" style={{ background: '#7b3fa0' }} />{layerConfig.keyPrefix} restricted byway</li>,
+                      <li key={`${layerConfig.id}-byway`}><span className="map-key__swatch" style={{ background: '#b71c1c' }} />{layerConfig.keyPrefix} byway (all traffic)</li>,
+                    ])}
                 </ul>
               )}
             </div>

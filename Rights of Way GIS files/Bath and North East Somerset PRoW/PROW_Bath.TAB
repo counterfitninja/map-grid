@@ -1,0 +1,45 @@
+!table
+!version 500
+!charset WindowsLatin1
+!edit_version 650
+
+Definition Table
+  Type NATIVE Charset "WindowsLatin1"
+  Fields 20
+    PROW_REF Char (14) ;
+    OLD_REF Char (14) ;
+    WARD Char (15) ;
+    ON_DMS_TAB Char (5) ;
+    TYPE Decimal (16, 0) ;
+    STATUS Char (6) ;
+    LENGTH Decimal (13, 2) ;
+    DIRECTION Char (10) ;
+    STARTEAST Float ;
+    STARTNORTH Float ;
+    ENDEAST Float ;
+    ENDNORTH Float ;
+    LEAVES_MET_ROAD Char (1) ;
+    QTY_LMR Decimal (11, 0) ;
+    BS_COMPLIANT Char (14) ;
+    PROW_LINK Decimal (16, 0) ;
+    DATE_ADDED Date ;
+    EFFECTIVE_DATE Date ;
+    STYLE Char (2) ;
+    MI_PRINX Decimal (12, 0) ;
+begin_metadata
+"\IsReadOnly" = "FALSE"
+"\DATALINK" = ""
+"\DATALINK\Query" = "select * from ""MAPDATA"".""BATH_WORKING_COPY"""
+"\DATALINK\ConnectionString" = "SRVR=ismsdw;UID=mapdata"
+"\DATALINK\ToolKit" = "ORAINET"
+"\DATALINK\Autokey" = "OFF"
+"\CACHE" = "ON"
+"\MBRSEARCH" = "ON"
+"\MapInfo" = ""
+"\MapInfo\TableID" = "0f615cdc-916e-4364-a2d8-d009f785a328"
+"\MapInfo\ParentTableID" = "65d09c12-b5e2-4c1c-bc72-9f8908a8e1e4"
+"\OracleWorkspace" = ""
+"\OracleWorkspace\Versioned" = "OFF"
+"\OracleWorkspace\Name" = ""
+"\OracleWorkspace\ParentName" = ""
+end_metadata
