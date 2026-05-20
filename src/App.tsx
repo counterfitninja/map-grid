@@ -2527,7 +2527,7 @@ function App() {
           <div ref={mapContainerRef} className="map" aria-label="Printable map area" />
 
           {routeWaypoints.length > 0 && (
-            <aside className="route-card-overlay" aria-label="Route card">
+            <aside className="route-card-overlay route-card-overlay--hidden" aria-label="Route card">
               <h3>Cubs route card</h3>
               <p className="route-card-overlay__hint">Follow points in order (6-figure grid refs).</p>
               <table>

@@ -573,6 +573,10 @@
   display: none;
 }
 
+.route-card-overlay--hidden {
+  display: none;
+}
+
 .route-card-overlay {
   position: absolute;
   top: 1rem;
@@ -788,6 +792,10 @@
     margin: 0 auto;
     box-shadow: none;
     overflow: visible;
+  }
+
+  .shell.print-card-only .route-card-overlay--hidden {
+    display: block;
   }
 
   .shell.print-card-only .route-card-overlay {
