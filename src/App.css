@@ -257,6 +257,19 @@
   text-underline-offset: 2px;
 }
 
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.checkbox-label input[type='checkbox'] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

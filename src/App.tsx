@@ -907,6 +907,7 @@ function App() {
   const [printTitle, setPrintTitle] = useState(initialTitle)
   const [mapClickMode, setMapClickMode] = useState<'ping' | 'route'>('route')
   const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
+  const [showRouteLine, setShowRouteLine] = useState(true)
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
   const [routePathStatus, setRoutePathStatus] = useState('')
@@ -1544,7 +1545,7 @@ function App() {
         ? resolvedRouteCoordinates
         : routeWaypoints
 
-    if (lineCoordinates.length >= 2) {
+    if (lineCoordinates.length >= 2 && showRouteLine) {
       routeLineRef.current = L.polyline(
         lineCoordinates.map((waypoint) => [waypoint.lat, waypoint.lng] as L.LatLngTuple),
         {
@@ -1556,7 +1557,7 @@ function App() {
         },
       ).addTo(map)
     }
-  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates])
+  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates, showRouteLine])
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -2037,6 +2038,15 @@ function App() {
           </label>
 
           {routePathMode === 'prow' && <p className="status">{routePathStatus}</p>}
+
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={showRouteLine}
+              onChange={(event) => setShowRouteLine(event.target.checked)}
+            />
+            <span>Show line between points</span>
+          </label>
 
           <div className="chips">
             <button
