@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import L from 'leaflet'
 import './App.css'
 import {
@@ -14,6 +14,13 @@ type OverlayState = {
   spacingMode: 'auto' | 'manual'
   spacing: GridSpacing
   digits: GridDigits
+}
+
+type RouteWaypoint = {
+  id: number
+  lat: number
+  lng: number
+  gridReference: string
 }
 
 type LocalProwLayerId = 'somerset' | 'wiltshire' | 'banes'
@@ -200,6 +207,42 @@ const getGridSpacingForZoom = (zoom: number): GridSpacing => {
   }
 
   return 10000
+}
+
+const earthRadiusMeters = 6371000
+
+const toRadians = (value: number) => (value * Math.PI) / 180
+const toDegrees = (value: number) => (value * 180) / Math.PI
+
+const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => {
+  const dLat = toRadians(to.lat - from.lat)
+  const dLng = toRadians(to.lng - from.lng)
+  const lat1 = toRadians(from.lat)
+  const lat2 = toRadians(to.lat)
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return earthRadiusMeters * c
+}
+
+const calculateBearingDegrees = (from: L.LatLngLiteral, to: L.LatLngLiteral) => {
+  const lat1 = toRadians(from.lat)
+  const lat2 = toRadians(to.lat)
+  const deltaLng = toRadians(to.lng - from.lng)
+
+  const y = Math.sin(deltaLng) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng)
+  const bearing = (toDegrees(Math.atan2(y, x)) + 360) % 360
+
+  return bearing
+}
+
+const bearingToCompass = (bearing: number) => {
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  const index = Math.round(bearing / 45) % 8
+  return directions[index]
 }
 
 class BritishGridOverlay extends L.Layer {
@@ -499,6 +542,8 @@ function App() {
     banes: false,
   })
   const pingMarkerRef = useRef<L.Marker | null>(null)
+  const routeLineRef = useRef<L.Polyline | null>(null)
+  const routeMarkerLayerRef = useRef<L.LayerGroup | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({
     spacingMode: 'auto',
@@ -518,6 +563,8 @@ function App() {
   const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
   const [statusText, setStatusText] = useState('Initialising map...')
   const [printTitle, setPrintTitle] = useState(initialTitle)
+  const [mapClickMode, setMapClickMode] = useState<'ping' | 'route'>('route')
+  const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
   const [storedOsSettings] = useState<Partial<StoredOsSettings>>(() => loadStoredOsSettings())
@@ -563,6 +610,29 @@ function App() {
   const [osEndpointAutoFixMessage, setOsEndpointAutoFixMessage] = useState('')
   const [autoResolvedEndpoint, setAutoResolvedEndpoint] = useState<'wmts' | 'zxy'>('wmts')
   const localProwEnabledRef = useRef(localProwEnabled)
+
+  const routeLegs = useMemo(() => {
+    if (routeWaypoints.length < 2) {
+      return [] as Array<{ distanceMeters: number; bearingDegrees: number; fromIndex: number; toIndex: number }>
+    }
+
+    return routeWaypoints.slice(1).map((toPoint, index) => {
+      const fromPoint = routeWaypoints[index]
+      const from = { lat: fromPoint.lat, lng: fromPoint.lng }
+      const to = { lat: toPoint.lat, lng: toPoint.lng }
+      return {
+        fromIndex: index,
+        toIndex: index + 1,
+        distanceMeters: calculateDistanceMeters(from, to),
+        bearingDegrees: calculateBearingDegrees(from, to),
+      }
+    })
+  }, [routeWaypoints])
+
+  const totalRouteDistanceMeters = useMemo(
+    () => routeLegs.reduce((total, leg) => total + leg.distanceMeters, 0),
+    [routeLegs],
+  )
 
   const activeOsApiKey = osProjectApiKey.trim()
 
@@ -1031,6 +1101,65 @@ function App() {
   }, [overlayState, pingLocation])
 
   useEffect(() => {
+    if (routeWaypoints.length === 0) {
+      return
+    }
+
+    setRouteWaypoints((current) =>
+      current.map((waypoint) => ({
+        ...waypoint,
+        gridReference: britishGridRef(latLngToBritishGrid(waypoint), overlayState.digits),
+      })),
+    )
+  // Rebuild waypoint grid references only when precision changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayState.digits])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) {
+      return
+    }
+
+    if (!routeMarkerLayerRef.current) {
+      routeMarkerLayerRef.current = L.layerGroup().addTo(map)
+    }
+
+    routeMarkerLayerRef.current.clearLayers()
+
+    if (routeLineRef.current) {
+      map.removeLayer(routeLineRef.current)
+      routeLineRef.current = null
+    }
+
+    for (const [index, waypoint] of routeWaypoints.entries()) {
+      const marker = L.marker([waypoint.lat, waypoint.lng], {
+        icon: L.divIcon({
+          className: 'map-route-point-icon',
+          html: `<span>${index + 1}</span>`,
+          iconSize: [24, 24],
+          iconAnchor: [12, 12],
+        }),
+      }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
+
+      routeMarkerLayerRef.current.addLayer(marker)
+    }
+
+    if (routeWaypoints.length >= 2) {
+      routeLineRef.current = L.polyline(
+        routeWaypoints.map((waypoint) => [waypoint.lat, waypoint.lng] as L.LatLngTuple),
+        {
+          color: '#0b6d53',
+          weight: 4,
+          opacity: 0.92,
+          dashArray: '9 6',
+          pane: 'overlayPane',
+        },
+      ).addTo(map)
+    }
+  }, [routeWaypoints])
+
+  useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
       return
     }
@@ -1091,7 +1220,26 @@ function App() {
       setPingReference(gridReference)
     }
 
+    const addRouteWaypoint = (latLng: L.LatLng) => {
+      const nextPoint: RouteWaypoint = {
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        lat: latLng.lat,
+        lng: latLng.lng,
+        gridReference: britishGridRef(
+          latLngToBritishGrid(latLng),
+          overlayStateRef.current.digits,
+        ),
+      }
+
+      setRouteWaypoints((current) => [...current, nextPoint])
+    }
+
     const handleMapClick = (event: L.LeafletMouseEvent) => {
+      if (mapClickMode === 'route') {
+        addRouteWaypoint(event.latlng)
+        return
+      }
+
       placePing(event.latlng)
     }
 
@@ -1130,6 +1278,10 @@ function App() {
       osmBaseLayerRef.current = null
       osLayerRef.current?.remove()
       osLayerRef.current = null
+      routeLineRef.current?.remove()
+      routeLineRef.current = null
+      routeMarkerLayerRef.current?.remove()
+      routeMarkerLayerRef.current = null
       for (const config of localProwLayerConfigs) {
         localProwLayerRefs.current[config.id]?.remove()
         localProwLayerRefs.current[config.id] = null
@@ -1139,7 +1291,7 @@ function App() {
       map.remove()
       mapRef.current = null
     }
-  }, [])
+  }, [mapClickMode])
 
   const focusLocation = (coordinates: L.LatLngExpression) => {
     mapRef.current?.setView(coordinates, 15)
@@ -1150,6 +1302,14 @@ function App() {
     pingMarkerRef.current = null
     setPingLocation(null)
     setPingReference('No ping placed yet. Click the map.')
+  }
+
+  const clearRouteWaypoints = () => {
+    setRouteWaypoints([])
+  }
+
+  const removeLastRouteWaypoint = () => {
+    setRouteWaypoints((current) => current.slice(0, -1))
   }
 
   const saveEditableTitle = () => {
@@ -1286,6 +1446,65 @@ function App() {
           >
             Clear ping
           </button>
+        </div>
+
+        <div className="card">
+          <p className="meta-label">Route card builder</p>
+
+          <label>
+            <span>Map click mode</span>
+            <select
+              value={mapClickMode}
+              onChange={(event) => setMapClickMode(event.target.value as 'ping' | 'route')}
+            >
+              <option value="route">Route points (in order)</option>
+              <option value="ping">Single ping</option>
+            </select>
+          </label>
+
+          <p className="status">
+            {mapClickMode === 'route'
+              ? 'Click the map to add route points in the order Cubs should follow.'
+              : 'Click the map to place one ping marker.'}
+          </p>
+
+          <div className="chips">
+            <button
+              type="button"
+              className="chip chip--secondary"
+              onClick={removeLastRouteWaypoint}
+              disabled={routeWaypoints.length === 0}
+            >
+              Remove last point
+            </button>
+            <button
+              type="button"
+              className="chip chip--secondary"
+              onClick={clearRouteWaypoints}
+              disabled={routeWaypoints.length === 0}
+            >
+              Clear route points
+            </button>
+          </div>
+
+          {routeWaypoints.length === 0 ? (
+            <p className="status">No route points yet.</p>
+          ) : (
+            <ol className="route-points-list">
+              {routeWaypoints.map((waypoint, index) => (
+                <li key={waypoint.id}>
+                  <span className="route-point-name">Point {index + 1}</span>
+                  <span className="route-point-grid">{waypoint.gridReference}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {routeWaypoints.length >= 2 && (
+            <p className="status">
+              Route length: {(totalRouteDistanceMeters / 1000).toFixed(2)} km ({Math.round(totalRouteDistanceMeters)} m)
+            </p>
+          )}
         </div>
 
         <div className="card">
@@ -1654,6 +1873,43 @@ function App() {
 
         <section className="map-frame">
           <div ref={mapContainerRef} className="map" aria-label="Printable map area" />
+
+          {routeWaypoints.length > 0 && (
+            <aside className="route-card-overlay" aria-label="Route card">
+              <h3>Cubs route card</h3>
+              <p className="route-card-overlay__hint">Follow points in order.</p>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Point</th>
+                    <th>Grid ref</th>
+                    <th>Leg</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {routeWaypoints.map((waypoint, index) => {
+                    const leg = routeLegs[index]
+                    return (
+                      <tr key={waypoint.id}>
+                        <td>{index + 1}</td>
+                        <td>{waypoint.gridReference}</td>
+                        <td>
+                          {leg
+                            ? `${Math.round(leg.distanceMeters)} m ${Math.round(leg.bearingDegrees)}° ${bearingToCompass(leg.bearingDegrees)}`
+                            : '-'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              {routeWaypoints.length >= 2 && (
+                <p className="route-card-overlay__total">
+                  Total: {(totalRouteDistanceMeters / 1000).toFixed(2)} km
+                </p>
+              )}
+            </aside>
+          )}
 
           {/* Collapsible map key — only shown when at least one overlay is active */}
           {(communityTrailsEnabled || officialProwEnabled || localProwLayerConfigs.some((layerConfig) => localProwEnabled[layerConfig.id] && localProwStatus[layerConfig.id] === 'ready')) && (

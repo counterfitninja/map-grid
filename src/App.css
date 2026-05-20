@@ -485,6 +485,100 @@
     0 8px 14px rgba(12, 37, 31, 0.35);
 }
 
+.map-route-point-icon {
+  background: transparent;
+  border: 0;
+}
+
+.map-route-point-icon span {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #f8f5ea;
+  border: 2px solid rgba(248, 245, 234, 0.95);
+  background: #0b6d53;
+  box-shadow: 0 0 0 2px rgba(12, 37, 31, 0.35);
+}
+
+.route-points-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.route-points-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.route-point-name {
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.route-point-grid {
+  font-family: var(--mono);
+  color: var(--ink-soft);
+}
+
+.route-card-overlay {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 950;
+  width: min(25rem, 46%);
+  max-height: calc(100% - 2rem);
+  overflow: auto;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(68, 63, 50, 0.4);
+  background: rgba(251, 247, 237, 0.95);
+  backdrop-filter: blur(2px);
+  box-shadow: 0 8px 18px rgba(32, 28, 18, 0.24);
+  padding: 0.7rem;
+}
+
+.route-card-overlay h3 {
+  margin: 0;
+  font-size: 0.86rem;
+  font-family: var(--heading);
+  color: var(--ink-strong);
+}
+
+.route-card-overlay__hint,
+.route-card-overlay__total {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.route-card-overlay table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.45rem;
+  font-size: 0.72rem;
+}
+
+.route-card-overlay th,
+.route-card-overlay td {
+  padding: 0.2rem 0.25rem;
+  border-bottom: 1px solid rgba(111, 98, 67, 0.2);
+  text-align: left;
+}
+
+.route-card-overlay th {
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
 .leaflet-gridPane-pane {
   z-index: 650;
 }
@@ -539,6 +633,13 @@
     width: 100%;
     aspect-ratio: 297 / 210;
     min-height: 60svh;
+  }
+
+  .route-card-overlay {
+    width: calc(100% - 1.5rem);
+    right: 0.75rem;
+    top: 0.75rem;
+    max-height: 52%;
   }
 }
 
@@ -601,6 +702,28 @@
     border-radius: 0;
     box-shadow: none;
     border: 1px solid #8e846d;
+  }
+
+  .route-card-overlay {
+    width: 9.6cm;
+    max-height: none;
+    overflow: visible;
+    border-radius: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    background: rgba(255, 255, 255, 0.97);
+    border-color: #7d7259;
+    top: 0.45cm;
+    right: 0.45cm;
+    padding: 0.35cm;
+  }
+
+  .route-card-overlay h3 {
+    font-size: 0.7rem;
+  }
+
+  .route-card-overlay table {
+    font-size: 0.6rem;
   }
 
   .leaflet-control-zoom {
