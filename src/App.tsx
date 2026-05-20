@@ -23,6 +23,12 @@ type RouteWaypoint = {
   gridReference: string
 }
 
+const routeCardDigits: GridDigits = 6
+
+type ProwSegment = {
+  coordinates: L.LatLngLiteral[]
+}
+
 type LocalProwLayerId = 'somerset' | 'wiltshire' | 'banes'
 
 type LocalProwLayerConfig = {
@@ -212,7 +218,6 @@ const getGridSpacingForZoom = (zoom: number): GridSpacing => {
 const earthRadiusMeters = 6371000
 
 const toRadians = (value: number) => (value * Math.PI) / 180
-const toDegrees = (value: number) => (value * 180) / Math.PI
 
 const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => {
   const dLat = toRadians(to.lat - from.lat)
@@ -227,22 +232,274 @@ const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => 
   return earthRadiusMeters * c
 }
 
-const calculateBearingDegrees = (from: L.LatLngLiteral, to: L.LatLngLiteral) => {
-  const lat1 = toRadians(from.lat)
-  const lat2 = toRadians(to.lat)
-  const deltaLng = toRadians(to.lng - from.lng)
+class MinPriorityQueue<T> {
+  private items: Array<{ item: T; priority: number }> = []
 
-  const y = Math.sin(deltaLng) * Math.cos(lat2)
-  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng)
-  const bearing = (toDegrees(Math.atan2(y, x)) + 360) % 360
+  get size() {
+    return this.items.length
+  }
 
-  return bearing
+  push(item: T, priority: number) {
+    this.items.push({ item, priority })
+    this.bubbleUp(this.items.length - 1)
+  }
+
+  pop() {
+    if (this.items.length === 0) {
+      return null
+    }
+
+    const top = this.items[0]
+    const end = this.items.pop()
+
+    if (this.items.length > 0 && end) {
+      this.items[0] = end
+      this.bubbleDown(0)
+    }
+
+    return top.item
+  }
+
+  private bubbleUp(startIndex: number) {
+    let index = startIndex
+
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2)
+      if (this.items[parentIndex].priority <= this.items[index].priority) {
+        break
+      }
+
+      const current = this.items[index]
+      this.items[index] = this.items[parentIndex]
+      this.items[parentIndex] = current
+      index = parentIndex
+    }
+  }
+
+  private bubbleDown(startIndex: number) {
+    let index = startIndex
+    const length = this.items.length
+
+    while (true) {
+      const left = index * 2 + 1
+      const right = index * 2 + 2
+      let smallest = index
+
+      if (left < length && this.items[left].priority < this.items[smallest].priority) {
+        smallest = left
+      }
+
+      if (right < length && this.items[right].priority < this.items[smallest].priority) {
+        smallest = right
+      }
+
+      if (smallest === index) {
+        break
+      }
+
+      const current = this.items[index]
+      this.items[index] = this.items[smallest]
+      this.items[smallest] = current
+      index = smallest
+    }
+  }
 }
 
-const bearingToCompass = (bearing: number) => {
-  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-  const index = Math.round(bearing / 45) % 8
-  return directions[index]
+const toCoordinateKey = (point: L.LatLngLiteral) => `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`
+
+const parseCoordinateKey = (key: string): L.LatLngLiteral => {
+  const [lat, lng] = key.split(',').map((part) => Number.parseFloat(part))
+  return { lat, lng }
+}
+
+const extractProwSegmentsFromGeoJson = (data: unknown): ProwSegment[] => {
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    !('features' in data) ||
+    !Array.isArray((data as { features?: unknown[] }).features)
+  ) {
+    return []
+  }
+
+  const segments: ProwSegment[] = []
+  const features = (data as { features: unknown[] }).features
+
+  for (const feature of features) {
+    if (!feature || typeof feature !== 'object' || !('geometry' in feature)) {
+      continue
+    }
+
+    const geometry = (feature as { geometry?: unknown }).geometry
+    if (!geometry || typeof geometry !== 'object' || !('type' in geometry) || !('coordinates' in geometry)) {
+      continue
+    }
+
+    const geometryType = (geometry as { type?: unknown }).type
+    const coordinates = (geometry as { coordinates?: unknown }).coordinates
+
+    if (geometryType === 'LineString' && Array.isArray(coordinates)) {
+      const points = coordinates
+        .map((coordinate) => {
+          if (!Array.isArray(coordinate) || coordinate.length < 2) {
+            return null
+          }
+
+          const [lng, lat] = coordinate
+          if (typeof lat !== 'number' || typeof lng !== 'number') {
+            return null
+          }
+
+          return { lat, lng }
+        })
+        .filter((point): point is L.LatLngLiteral => point !== null)
+
+      if (points.length >= 2) {
+        segments.push({ coordinates: points })
+      }
+      continue
+    }
+
+    if (geometryType === 'MultiLineString' && Array.isArray(coordinates)) {
+      for (const line of coordinates) {
+        if (!Array.isArray(line)) {
+          continue
+        }
+
+        const points = line
+          .map((coordinate) => {
+            if (!Array.isArray(coordinate) || coordinate.length < 2) {
+              return null
+            }
+
+            const [lng, lat] = coordinate
+            if (typeof lat !== 'number' || typeof lng !== 'number') {
+              return null
+            }
+
+            return { lat, lng }
+          })
+          .filter((point): point is L.LatLngLiteral => point !== null)
+
+        if (points.length >= 2) {
+          segments.push({ coordinates: points })
+        }
+      }
+    }
+  }
+
+  return segments
+}
+
+const shortestProwPath = (
+  segments: ProwSegment[],
+  startPoint: L.LatLngLiteral,
+  endPoint: L.LatLngLiteral,
+) => {
+  const coordinatesByKey = new Map<string, L.LatLngLiteral>()
+  const adjacency = new Map<string, Array<{ to: string; distanceMeters: number }>>()
+
+  const registerEdge = (from: string, to: string, distanceMeters: number) => {
+    const current = adjacency.get(from)
+    if (current) {
+      current.push({ to, distanceMeters })
+    } else {
+      adjacency.set(from, [{ to, distanceMeters }])
+    }
+  }
+
+  for (const segment of segments) {
+    for (let index = 1; index < segment.coordinates.length; index += 1) {
+      const from = segment.coordinates[index - 1]
+      const to = segment.coordinates[index]
+      const fromKey = toCoordinateKey(from)
+      const toKey = toCoordinateKey(to)
+      const distanceMeters = calculateDistanceMeters(from, to)
+
+      coordinatesByKey.set(fromKey, parseCoordinateKey(fromKey))
+      coordinatesByKey.set(toKey, parseCoordinateKey(toKey))
+      registerEdge(fromKey, toKey, distanceMeters)
+      registerEdge(toKey, fromKey, distanceMeters)
+    }
+  }
+
+  if (coordinatesByKey.size === 0) {
+    return null
+  }
+
+  const findNearestNodeKey = (target: L.LatLngLiteral) => {
+    let closestKey: string | null = null
+    let closestDistance = Number.POSITIVE_INFINITY
+
+    for (const [nodeKey, nodeCoordinate] of coordinatesByKey) {
+      const distance = calculateDistanceMeters(target, nodeCoordinate)
+      if (distance < closestDistance) {
+        closestDistance = distance
+        closestKey = nodeKey
+      }
+    }
+
+    return closestKey
+  }
+
+  const startKey = findNearestNodeKey(startPoint)
+  const goalKey = findNearestNodeKey(endPoint)
+
+  if (!startKey || !goalKey) {
+    return null
+  }
+
+  const open = new MinPriorityQueue<string>()
+  const cameFrom = new Map<string, string>()
+  const gScore = new Map<string, number>()
+  gScore.set(startKey, 0)
+  open.push(startKey, 0)
+
+  while (open.size > 0) {
+    const current = open.pop()
+    if (!current) {
+      break
+    }
+
+    if (current === goalKey) {
+      const keyPath: string[] = [current]
+      let walkKey = current
+
+      while (cameFrom.has(walkKey)) {
+        walkKey = cameFrom.get(walkKey) ?? walkKey
+        keyPath.push(walkKey)
+      }
+
+      keyPath.reverse()
+      return keyPath
+        .map((key) => coordinatesByKey.get(key))
+        .filter((point): point is L.LatLngLiteral => Boolean(point))
+    }
+
+    const neighbours = adjacency.get(current) ?? []
+    const currentScore = gScore.get(current) ?? Number.POSITIVE_INFINITY
+
+    for (const neighbour of neighbours) {
+      const tentativeScore = currentScore + neighbour.distanceMeters
+      const bestNeighbourScore = gScore.get(neighbour.to) ?? Number.POSITIVE_INFINITY
+      if (tentativeScore >= bestNeighbourScore) {
+        continue
+      }
+
+      cameFrom.set(neighbour.to, current)
+      gScore.set(neighbour.to, tentativeScore)
+      const neighbourCoordinate = coordinatesByKey.get(neighbour.to)
+      const goalCoordinate = coordinatesByKey.get(goalKey)
+      const heuristic =
+        neighbourCoordinate && goalCoordinate
+          ? calculateDistanceMeters(neighbourCoordinate, goalCoordinate)
+          : 0
+
+      open.push(neighbour.to, tentativeScore + heuristic)
+    }
+  }
+
+  return null
 }
 
 class BritishGridOverlay extends L.Layer {
@@ -541,6 +798,11 @@ function App() {
     wiltshire: false,
     banes: false,
   })
+  const localProwSegmentsRef = useRef<Record<LocalProwLayerId, ProwSegment[]>>({
+    somerset: [],
+    wiltshire: [],
+    banes: [],
+  })
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const routeLineRef = useRef<L.Polyline | null>(null)
   const routeMarkerLayerRef = useRef<L.LayerGroup | null>(null)
@@ -564,7 +826,10 @@ function App() {
   const [statusText, setStatusText] = useState('Initialising map...')
   const [printTitle, setPrintTitle] = useState(initialTitle)
   const [mapClickMode, setMapClickMode] = useState<'ping' | 'route'>('route')
+  const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
+  const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
+  const [routePathStatus, setRoutePathStatus] = useState('')
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
   const [storedOsSettings] = useState<Partial<StoredOsSettings>>(() => loadStoredOsSettings())
@@ -609,29 +874,25 @@ function App() {
   const [osKeyTestSummary, setOsKeyTestSummary] = useState('')
   const [osEndpointAutoFixMessage, setOsEndpointAutoFixMessage] = useState('')
   const [autoResolvedEndpoint, setAutoResolvedEndpoint] = useState<'wmts' | 'zxy'>('wmts')
+  const [localProwNetworkVersion, setLocalProwNetworkVersion] = useState(0)
   const localProwEnabledRef = useRef(localProwEnabled)
 
-  const routeLegs = useMemo(() => {
-    if (routeWaypoints.length < 2) {
-      return [] as Array<{ distanceMeters: number; bearingDegrees: number; fromIndex: number; toIndex: number }>
-    }
-
-    return routeWaypoints.slice(1).map((toPoint, index) => {
-      const fromPoint = routeWaypoints[index]
-      const from = { lat: fromPoint.lat, lng: fromPoint.lng }
-      const to = { lat: toPoint.lat, lng: toPoint.lng }
-      return {
-        fromIndex: index,
-        toIndex: index + 1,
-        distanceMeters: calculateDistanceMeters(from, to),
-        bearingDegrees: calculateBearingDegrees(from, to),
-      }
-    })
-  }, [routeWaypoints])
-
   const totalRouteDistanceMeters = useMemo(
-    () => routeLegs.reduce((total, leg) => total + leg.distanceMeters, 0),
-    [routeLegs],
+    () =>
+      routeWaypoints.slice(1).reduce((total, waypoint, index) => {
+        const from = routeWaypoints[index]
+        const to = waypoint
+        return total + calculateDistanceMeters(from, to)
+      }, 0),
+    [routeWaypoints],
+  )
+
+  const activeProwSegments = useMemo(
+    () =>
+      localProwLayerConfigs
+        .filter((config) => localProwEnabled[config.id] && localProwStatus[config.id] === 'ready')
+        .flatMap((config) => localProwSegmentsRef.current[config.id] ?? []),
+    [localProwEnabled, localProwStatus, localProwNetworkVersion],
   )
 
   const activeOsApiKey = osProjectApiKey.trim()
@@ -1055,6 +1316,8 @@ function App() {
           })
 
           localProwLayerRefs.current[config.id] = nextLayer
+          localProwSegmentsRef.current[config.id] = extractProwSegmentsFromGeoJson(data)
+          setLocalProwNetworkVersion((current) => current + 1)
           setLocalProwFeatureCount((current) => ({ ...current, [config.id]: featureCount }))
           setLocalProwStatus((current) => ({ ...current, [config.id]: 'ready' }))
 
@@ -1065,6 +1328,8 @@ function App() {
           console.info(`[${config.label}] Loaded ${featureCount} features.`)
         })
         .catch((error: unknown) => {
+          localProwSegmentsRef.current[config.id] = []
+          setLocalProwNetworkVersion((current) => current + 1)
           setLocalProwStatus((current) => ({ ...current, [config.id]: 'error' }))
           console.error(`[${config.label}] Failed to load GeoJSON.`, error)
         })
@@ -1108,12 +1373,45 @@ function App() {
     setRouteWaypoints((current) =>
       current.map((waypoint) => ({
         ...waypoint,
-        gridReference: britishGridRef(latLngToBritishGrid(waypoint), overlayState.digits),
+        gridReference: britishGridRef(latLngToBritishGrid(waypoint), routeCardDigits),
       })),
     )
   // Rebuild waypoint grid references only when precision changes.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlayState.digits])
+
+  useEffect(() => {
+    if (routePathMode !== 'prow') {
+      setResolvedRouteCoordinates(null)
+      setRoutePathStatus('')
+      return
+    }
+
+    if (routeWaypoints.length !== 2) {
+      setResolvedRouteCoordinates(null)
+      setRoutePathStatus('PRoW routing works with exactly 2 points.')
+      return
+    }
+
+    if (activeProwSegments.length === 0) {
+      setResolvedRouteCoordinates(null)
+      setRoutePathStatus('Enable a local PRoW layer to route along rights of way.')
+      return
+    }
+
+    const start = routeWaypoints[0]
+    const end = routeWaypoints[1]
+    const path = shortestProwPath(activeProwSegments, start, end)
+
+    if (!path || path.length < 2) {
+      setResolvedRouteCoordinates(null)
+      setRoutePathStatus('No connected PRoW route found between these two points.')
+      return
+    }
+
+    setResolvedRouteCoordinates(path)
+    setRoutePathStatus(`Following PRoW network (${path.length} nodes).`)
+  }, [routePathMode, routeWaypoints, activeProwSegments])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1145,9 +1443,14 @@ function App() {
       routeMarkerLayerRef.current.addLayer(marker)
     }
 
-    if (routeWaypoints.length >= 2) {
+    const lineCoordinates =
+      routePathMode === 'prow' && resolvedRouteCoordinates && resolvedRouteCoordinates.length >= 2
+        ? resolvedRouteCoordinates
+        : routeWaypoints
+
+    if (lineCoordinates.length >= 2) {
       routeLineRef.current = L.polyline(
-        routeWaypoints.map((waypoint) => [waypoint.lat, waypoint.lng] as L.LatLngTuple),
+        lineCoordinates.map((waypoint) => [waypoint.lat, waypoint.lng] as L.LatLngTuple),
         {
           color: '#0b6d53',
           weight: 4,
@@ -1157,7 +1460,7 @@ function App() {
         },
       ).addTo(map)
     }
-  }, [routeWaypoints])
+  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates])
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -1227,7 +1530,7 @@ function App() {
         lng: latLng.lng,
         gridReference: britishGridRef(
           latLngToBritishGrid(latLng),
-          overlayStateRef.current.digits,
+          routeCardDigits,
         ),
       }
 
@@ -1467,6 +1770,19 @@ function App() {
               ? 'Click the map to add route points in the order Cubs should follow.'
               : 'Click the map to place one ping marker.'}
           </p>
+
+          <label>
+            <span>Route line mode</span>
+            <select
+              value={routePathMode}
+              onChange={(event) => setRoutePathMode(event.target.value as 'straight' | 'prow')}
+            >
+              <option value="prow">Follow PRoW network (2 points)</option>
+              <option value="straight">Straight line between points</option>
+            </select>
+          </label>
+
+          {routePathMode === 'prow' && <p className="status">{routePathStatus}</p>}
 
           <div className="chips">
             <button
@@ -1877,30 +2193,21 @@ function App() {
           {routeWaypoints.length > 0 && (
             <aside className="route-card-overlay" aria-label="Route card">
               <h3>Cubs route card</h3>
-              <p className="route-card-overlay__hint">Follow points in order.</p>
+              <p className="route-card-overlay__hint">Follow points in order (6-figure grid refs).</p>
               <table>
                 <thead>
                   <tr>
                     <th>Point</th>
                     <th>Grid ref</th>
-                    <th>Leg</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {routeWaypoints.map((waypoint, index) => {
-                    const leg = routeLegs[index]
-                    return (
-                      <tr key={waypoint.id}>
-                        <td>{index + 1}</td>
-                        <td>{waypoint.gridReference}</td>
-                        <td>
-                          {leg
-                            ? `${Math.round(leg.distanceMeters)} m ${Math.round(leg.bearingDegrees)}° ${bearingToCompass(leg.bearingDegrees)}`
-                            : '-'}
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {routeWaypoints.map((waypoint, index) => (
+                    <tr key={waypoint.id}>
+                      <td>{index + 1}</td>
+                      <td>{waypoint.gridReference}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               {routeWaypoints.length >= 2 && (
