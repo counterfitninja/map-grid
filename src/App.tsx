@@ -1527,17 +1527,19 @@ function App() {
       routeLineRef.current = null
     }
 
-    for (const [index, waypoint] of routeWaypoints.entries()) {
-      const marker = L.marker([waypoint.lat, waypoint.lng], {
-        icon: L.divIcon({
-          className: 'map-route-point-icon',
-          html: `<span>${index + 1}</span>`,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        }),
-      }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
+    if (showRouteLine) {
+      for (const [index, waypoint] of routeWaypoints.entries()) {
+        const marker = L.marker([waypoint.lat, waypoint.lng], {
+          icon: L.divIcon({
+            className: 'map-route-point-icon',
+            html: `<span>${index + 1}</span>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          }),
+        }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
 
-      routeMarkerLayerRef.current.addLayer(marker)
+        routeMarkerLayerRef.current.addLayer(marker)
+      }
     }
 
     const lineCoordinates =
