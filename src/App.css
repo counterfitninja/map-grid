@@ -323,6 +323,18 @@
   box-shadow: 0 1rem 1.8rem rgba(29, 85, 71, 0.24);
 }
 
+.print-button-secondary {
+  color: #1c2f2a;
+  background: rgba(211, 177, 107, 0.35);
+  box-shadow: none;
+}
+
+.print-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
+}
+
 .map-stage {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -724,6 +736,45 @@
 
   .route-card-overlay table {
     font-size: 0.6rem;
+  }
+
+  .shell.print-card-only .map-header,
+  .shell.print-card-only .map,
+  .shell.print-card-only .map-key,
+  .shell.print-card-only .leaflet-control-container {
+    display: none !important;
+  }
+
+  .shell.print-card-only .map-stage {
+    display: block;
+  }
+
+  .shell.print-card-only .map-frame {
+    max-width: 18cm;
+    width: 100%;
+    height: auto;
+    border: 0;
+    margin: 0 auto;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .shell.print-card-only .route-card-overlay {
+    position: static;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    border: 1px solid #6f664f;
+    background: #fff;
+    padding: 0.55cm;
+  }
+
+  .shell.print-card-only .route-card-overlay h3 {
+    font-size: 0.95rem;
+  }
+
+  .shell.print-card-only .route-card-overlay table {
+    font-size: 0.78rem;
   }
 
   .leaflet-control-zoom {

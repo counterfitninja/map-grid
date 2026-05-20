@@ -830,6 +830,7 @@ function App() {
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
   const [routePathStatus, setRoutePathStatus] = useState('')
+  const [printMode, setPrintMode] = useState<'map' | 'card'>('map')
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
   const [storedOsSettings] = useState<Partial<StoredOsSettings>>(() => loadStoredOsSettings())
@@ -1654,8 +1655,33 @@ function App() {
     }
   }, [printTitle])
 
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setPrintMode('map')
+    }
+
+    window.addEventListener('afterprint', handleAfterPrint)
+
+    return () => {
+      window.removeEventListener('afterprint', handleAfterPrint)
+    }
+  }, [])
+
+  const printMapSection = () => {
+    setPrintMode('map')
+    window.print()
+  }
+
+  const printRouteCardOnly = () => {
+    setPrintMode('card')
+    // Allow the class update to render before opening print preview.
+    requestAnimationFrame(() => {
+      window.print()
+    })
+  }
+
   return (
-    <div className="shell">
+    <div className={`shell${printMode === 'card' ? ' print-card-only' : ''}`}>
       <aside className="panel no-print">
         <p className="eyebrow">Cubs Map Printer</p>
         <h1>OpenStreetMap with a UK grid overlay for printable route cards.</h1>
@@ -1665,8 +1691,17 @@ function App() {
           references visible.
         </p>
 
-        <button type="button" className="print-button" onClick={() => window.print()}>
+        <button type="button" className="print-button" onClick={printMapSection}>
           Print this map section
+        </button>
+
+        <button
+          type="button"
+          className="print-button print-button-secondary"
+          onClick={printRouteCardOnly}
+          disabled={routeWaypoints.length === 0}
+        >
+          Print route card only
         </button>
 
         <div className="card">
