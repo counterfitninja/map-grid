@@ -1531,7 +1531,7 @@ function App() {
       const marker = L.marker([waypoint.lat, waypoint.lng], {
         icon: L.divIcon({
           className: 'map-route-point-icon',
-          html: showRouteLine ? `<span>${index + 1}</span>` : '',
+          html: showRouteLine ? `<span>${index + 1}</span>` : '<span></span>',
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         }),
