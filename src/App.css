@@ -542,6 +542,37 @@
   color: var(--ink-soft);
 }
 
+.saved-routes-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.saved-routes-list li {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border: 1px solid rgba(83, 75, 56, 0.2);
+  border-radius: 0.6rem;
+  background: rgba(255, 252, 246, 0.55);
+}
+
+.saved-route-name {
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.saved-route-meta {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.route-import-input {
+  display: none;
+}
+
 .route-card-overlay {
   position: absolute;
   top: 1rem;

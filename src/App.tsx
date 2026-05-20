@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import L from 'leaflet'
 import './App.css'
 import {
@@ -93,10 +93,67 @@ type StoredOsSettings = {
   osEndpoint: 'auto' | 'zxy' | 'wmts'
 }
 
+type SavedRoute = {
+  id: string
+  name: string
+  createdAt: string
+  pathMode: 'straight' | 'prow'
+  waypoints: Array<Pick<RouteWaypoint, 'lat' | 'lng' | 'gridReference'>>
+}
+
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
 const osSettingsStorageKey = 'map-grid.os-settings.v1'
+const savedRoutesStorageKey = 'map-grid.saved-routes.v1'
+const savedRoutesBackupVersion = 1
 const defaultOsZxyEndpoint = 'https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857'
 const defaultOsWmtsEndpoint = 'https://api.os.uk/maps/raster/v1/wmts'
+
+const isSavedRoute = (entry: unknown): entry is SavedRoute => {
+  if (!entry || typeof entry !== 'object') {
+    return false
+  }
+
+  const candidate = entry as Partial<SavedRoute>
+
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.createdAt === 'string' &&
+    (candidate.pathMode === 'straight' || candidate.pathMode === 'prow') &&
+    Array.isArray(candidate.waypoints) &&
+    candidate.waypoints.every((waypoint) => {
+      if (!waypoint || typeof waypoint !== 'object') {
+        return false
+      }
+
+      const nextWaypoint = waypoint as Partial<RouteWaypoint>
+      return (
+        typeof nextWaypoint.lat === 'number' &&
+        Number.isFinite(nextWaypoint.lat) &&
+        typeof nextWaypoint.lng === 'number' &&
+        Number.isFinite(nextWaypoint.lng) &&
+        typeof nextWaypoint.gridReference === 'string'
+      )
+    })
+  )
+}
+
+const normalizeImportedSavedRoutes = (input: unknown): SavedRoute[] => {
+  if (Array.isArray(input)) {
+    return input.filter((entry): entry is SavedRoute => isSavedRoute(entry))
+  }
+
+  if (!input || typeof input !== 'object') {
+    return []
+  }
+
+  const candidate = input as { routes?: unknown; version?: unknown }
+  if (candidate.version !== savedRoutesBackupVersion || !Array.isArray(candidate.routes)) {
+    return []
+  }
+
+  return candidate.routes.filter((entry): entry is SavedRoute => isSavedRoute(entry))
+}
 
 const getZxyEndpointForLayer = (layer: 'Outdoor_3857' | 'Road_3857' | 'Light_3857') =>
   `https://api.os.uk/maps/raster/v1/zxy/${layer}`
@@ -120,6 +177,28 @@ const loadStoredOsSettings = (): Partial<StoredOsSettings> => {
     return parsed ?? {}
   } catch {
     return {}
+  }
+}
+
+const loadSavedRoutes = (): SavedRoute[] => {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    const raw = window.localStorage.getItem(savedRoutesStorageKey)
+    if (!raw) {
+      return []
+    }
+
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed.filter((entry): entry is SavedRoute => isSavedRoute(entry))
+  } catch {
+    return []
   }
 }
 
@@ -806,6 +885,7 @@ function App() {
   const pingMarkerRef = useRef<L.Marker | null>(null)
   const routeLineRef = useRef<L.Polyline | null>(null)
   const routeMarkerLayerRef = useRef<L.LayerGroup | null>(null)
+  const routeImportInputRef = useRef<HTMLInputElement | null>(null)
   const titleRef = useRef<HTMLHeadingElement | null>(null)
   const overlayStateRef = useRef<OverlayState>({
     spacingMode: 'auto',
@@ -830,6 +910,9 @@ function App() {
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
   const [routePathStatus, setRoutePathStatus] = useState('')
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(() => loadSavedRoutes())
+  const [routeNameInput, setRouteNameInput] = useState('')
+  const [routeImportStatus, setRouteImportStatus] = useState('')
   const [printMode, setPrintMode] = useState<'map' | 'card'>('map')
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
@@ -977,6 +1060,18 @@ function App() {
       // Ignore storage failures (private mode/quota); app still works without persistence.
     }
   }, [baseMap, osRasterLayer, osProjectApiKey, osProjectApiSecret, osZxyEndpoint, osWmtsEndpoint, osEndpoint])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      window.localStorage.setItem(savedRoutesStorageKey, JSON.stringify(savedRoutes))
+    } catch {
+      // Ignore storage failures (private mode/quota); app still works without persistence.
+    }
+  }, [savedRoutes])
 
   useEffect(() => {
     const map = mapRef.current
@@ -1616,6 +1711,130 @@ function App() {
     setRouteWaypoints((current) => current.slice(0, -1))
   }
 
+  const createRouteId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+
+    return `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
+  }
+
+  const saveCurrentRoute = () => {
+    if (routeWaypoints.length === 0) {
+      return
+    }
+
+    const trimmedName = routeNameInput.trim()
+    const routeName = trimmedName || `Route ${new Date().toLocaleString('en-GB')}`
+
+    const routeToSave: SavedRoute = {
+      id: createRouteId(),
+      name: routeName,
+      createdAt: new Date().toISOString(),
+      pathMode: routePathMode,
+      waypoints: routeWaypoints.map((waypoint) => ({
+        lat: waypoint.lat,
+        lng: waypoint.lng,
+        gridReference: waypoint.gridReference,
+      })),
+    }
+
+    setSavedRoutes((current) => [routeToSave, ...current].slice(0, 30))
+    setRouteNameInput('')
+  }
+
+  const loadSavedRoute = (savedRoute: SavedRoute) => {
+    setRoutePathMode(savedRoute.pathMode)
+    setMapClickMode('route')
+    setRouteWaypoints(
+      savedRoute.waypoints.map((waypoint, index) => ({
+        id: Number(`${Date.now()}${index}`) + Math.floor(Math.random() * 1000),
+        lat: waypoint.lat,
+        lng: waypoint.lng,
+        gridReference: britishGridRef(latLngToBritishGrid(waypoint), routeCardDigits),
+      })),
+    )
+
+    const firstWaypoint = savedRoute.waypoints[0]
+    if (firstWaypoint) {
+      mapRef.current?.setView([firstWaypoint.lat, firstWaypoint.lng], mapRef.current.getZoom())
+    }
+  }
+
+  const deleteSavedRoute = (savedRouteId: string) => {
+    setSavedRoutes((current) => current.filter((savedRoute) => savedRoute.id !== savedRouteId))
+  }
+
+  const exportSavedRoutes = () => {
+    if (savedRoutes.length === 0) {
+      setRouteImportStatus('No saved routes to export yet.')
+      return
+    }
+
+    const payload = {
+      version: savedRoutesBackupVersion,
+      exportedAt: new Date().toISOString(),
+      routes: savedRoutes,
+    }
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const downloadUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = downloadUrl
+    anchor.download = `map-grid-routes-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(downloadUrl)
+    setRouteImportStatus(`Exported ${savedRoutes.length} saved route${savedRoutes.length === 1 ? '' : 's'}.`)
+  }
+
+  const openRouteImportPicker = () => {
+    routeImportInputRef.current?.click()
+  }
+
+  const importSavedRoutes = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!selectedFile) {
+      return
+    }
+
+    try {
+      const raw = await selectedFile.text()
+      const parsed = JSON.parse(raw)
+      const importedRoutes = normalizeImportedSavedRoutes(parsed)
+
+      if (importedRoutes.length === 0) {
+        setRouteImportStatus('No valid routes were found in that file.')
+        return
+      }
+
+      setSavedRoutes((current) => {
+        const existingIds = new Set(current.map((route) => route.id))
+        const dedupedImports: SavedRoute[] = []
+
+        for (const importedRoute of importedRoutes) {
+          const nextRoute = existingIds.has(importedRoute.id)
+            ? { ...importedRoute, id: createRouteId() }
+            : importedRoute
+
+          existingIds.add(nextRoute.id)
+          dedupedImports.push(nextRoute)
+        }
+
+        return [...dedupedImports, ...current].slice(0, 30)
+      })
+
+      setRouteImportStatus(
+        `Imported ${importedRoutes.length} route${importedRoutes.length === 1 ? '' : 's'} from ${selectedFile.name}.`,
+      )
+    } catch {
+      setRouteImportStatus('Could not import that file. Use a JSON file exported from this app.')
+    }
+  }
+
   const saveEditableTitle = () => {
     if (!titleRef.current) {
       return
@@ -1837,6 +2056,88 @@ function App() {
               Clear route points
             </button>
           </div>
+
+          <label>
+            <span>Save current route as</span>
+            <input
+              type="text"
+              placeholder="e.g. Pack walk - Week 3"
+              value={routeNameInput}
+              onChange={(event) => setRouteNameInput(event.target.value)}
+            />
+          </label>
+
+          <button
+            type="button"
+            className="chip chip--secondary"
+            onClick={saveCurrentRoute}
+            disabled={routeWaypoints.length === 0}
+          >
+            Save route
+          </button>
+
+          <div className="chips">
+            <button
+              type="button"
+              className="chip chip--secondary"
+              onClick={exportSavedRoutes}
+              disabled={savedRoutes.length === 0}
+            >
+              Export routes
+            </button>
+            <button
+              type="button"
+              className="chip chip--secondary"
+              onClick={openRouteImportPicker}
+            >
+              Import routes
+            </button>
+          </div>
+
+          <input
+            ref={routeImportInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="route-import-input"
+            onChange={(event) => {
+              void importSavedRoutes(event)
+            }}
+          />
+
+          <p className="status">Saved routes stay on this browser for later recall.</p>
+          {routeImportStatus && <p className="status">{routeImportStatus}</p>}
+
+          {savedRoutes.length === 0 ? (
+            <p className="status">No saved routes yet.</p>
+          ) : (
+            <ul className="saved-routes-list">
+              {savedRoutes.map((savedRoute) => (
+                <li key={savedRoute.id}>
+                  <span className="saved-route-name">{savedRoute.name}</span>
+                  <span className="saved-route-meta">
+                    {savedRoute.waypoints.length} points ·{' '}
+                    {new Date(savedRoute.createdAt).toLocaleDateString('en-GB')}
+                  </span>
+                  <div className="chips">
+                    <button
+                      type="button"
+                      className="chip chip--secondary"
+                      onClick={() => loadSavedRoute(savedRoute)}
+                    >
+                      Load
+                    </button>
+                    <button
+                      type="button"
+                      className="chip chip--secondary"
+                      onClick={() => deleteSavedRoute(savedRoute.id)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
 
           {routeWaypoints.length === 0 ? (
             <p className="status">No route points yet.</p>
