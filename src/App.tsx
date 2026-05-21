@@ -1539,7 +1539,18 @@ function App() {
           iconAnchor: [12, 12],
         }),
       }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
-      marker.on('dblclick', () => toggleWaypointNumber(index))
+      marker.on('dblclick', (event) => {
+        event.originalEvent.preventDefault()
+        event.originalEvent.stopPropagation()
+        toggleWaypointNumber(index)
+      })
+      marker.on('click', (event) => {
+        if (event.originalEvent.detail >= 2) {
+          event.originalEvent.preventDefault()
+          event.originalEvent.stopPropagation()
+          toggleWaypointNumber(index)
+        }
+      })
       routeMarkerLayerRef.current.addLayer(marker)
     }
 
