@@ -23,6 +23,7 @@ type RouteWaypoint = {
   lat: number
   lng: number
   gridReference: string
+  directionText: string
 }
 
 const routeCardDigits: GridDigits = 6
@@ -100,7 +101,7 @@ type SavedRoute = {
   name: string
   createdAt: string
   pathMode: 'straight' | 'prow'
-  waypoints: Array<Pick<RouteWaypoint, 'lat' | 'lng' | 'gridReference'>>
+  waypoints: Array<Pick<RouteWaypoint, 'lat' | 'lng' | 'gridReference' | 'directionText'>>
 }
 
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
@@ -134,7 +135,8 @@ const isSavedRoute = (entry: unknown): entry is SavedRoute => {
         Number.isFinite(nextWaypoint.lat) &&
         typeof nextWaypoint.lng === 'number' &&
         Number.isFinite(nextWaypoint.lng) &&
-        typeof nextWaypoint.gridReference === 'string'
+        typeof nextWaypoint.gridReference === 'string' &&
+        (nextWaypoint.directionText === undefined || typeof nextWaypoint.directionText === 'string')
       )
     })
   )
@@ -311,24 +313,6 @@ const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 
   return earthRadiusMeters * c
-}
-
-const getCompassDirection = (from: L.LatLngLiteral, to: L.LatLngLiteral) => {
-  const lat1 = toRadians(from.lat)
-  const lat2 = toRadians(to.lat)
-  const dLng = toRadians(to.lng - from.lng)
-
-  const y = Math.sin(dLng) * Math.cos(lat2)
-  const x =
-    Math.cos(lat1) * Math.sin(lat2) -
-    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
-  const bearing = (Math.atan2(y, x) * 180) / Math.PI
-  const normalizedBearing = (bearing + 360) % 360
-
-  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
-  const directionIndex = Math.round(normalizedBearing / 45) % directions.length
-
-  return directions[directionIndex]
 }
 
 class MinPriorityQueue<T> {
@@ -993,19 +977,6 @@ function App() {
     [routeWaypoints],
   )
 
-  const routeCardDirections = useMemo(
-    () =>
-      routeWaypoints.map((waypoint, index) => {
-        const nextWaypoint = routeWaypoints[index + 1]
-        if (!nextWaypoint) {
-          return 'Finish'
-        }
-
-        return getCompassDirection(waypoint, nextWaypoint)
-      }),
-    [routeWaypoints],
-  )
-
   const activeProwSegments = useMemo(
     () =>
       localProwLayerConfigs
@@ -1666,6 +1637,7 @@ function App() {
           latLngToBritishGrid(latLng),
           routeCardDigits,
         ),
+        directionText: '',
       }
 
       setRouteWaypoints((current) => [...current, nextPoint])
@@ -1774,6 +1746,7 @@ function App() {
         lat: waypoint.lat,
         lng: waypoint.lng,
         gridReference: waypoint.gridReference,
+        directionText: waypoint.directionText,
       })),
     }
 
@@ -1790,6 +1763,7 @@ function App() {
         lat: waypoint.lat,
         lng: waypoint.lng,
         gridReference: britishGridRef(latLngToBritishGrid(waypoint), routeCardDigits),
+        directionText: waypoint.directionText ?? '',
       })),
     )
 
@@ -2192,8 +2166,28 @@ function App() {
             <ol className="route-points-list">
               {routeWaypoints.map((waypoint, index) => (
                 <li key={waypoint.id}>
-                  <span className="route-point-name">Point {index + 1}</span>
-                  <span className="route-point-grid">{waypoint.gridReference}</span>
+                  <div className="route-point-summary">
+                    <span className="route-point-name">Point {index + 1}</span>
+                    <span className="route-point-grid">{waypoint.gridReference}</span>
+                  </div>
+                  <label className="route-point-direction">
+                    <span>Cubs direction</span>
+                    <input
+                      type="text"
+                      placeholder="Add your own direction"
+                      value={waypoint.directionText}
+                      onChange={(event) => {
+                        const directionText = event.target.value
+                        setRouteWaypoints((current) =>
+                          current.map((currentWaypoint) =>
+                            currentWaypoint.id === waypoint.id
+                              ? { ...currentWaypoint, directionText }
+                              : currentWaypoint,
+                          ),
+                        )
+                      }}
+                    />
+                  </label>
                 </li>
               ))}
             </ol>
@@ -2582,7 +2576,7 @@ function App() {
                   <tr>
                     <th>Point</th>
                     <th>Grid ref</th>
-                    <th>Compass direction</th>
+                    <th>Cubs direction</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2590,7 +2584,7 @@ function App() {
                     <tr key={waypoint.id}>
                       <td>{index + 1}</td>
                       <td>{waypoint.gridReference}</td>
-                      <td>{routeCardDirections[index]}</td>
+                      <td>{waypoint.directionText || ' '}</td>
                     </tr>
                   ))}
                 </tbody>

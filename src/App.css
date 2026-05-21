@@ -539,6 +539,13 @@
 }
 
 .route-points-list li {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(111, 98, 67, 0.14);
+}
+
+.route-point-summary {
   display: flex;
   justify-content: space-between;
   gap: 0.4rem;
@@ -553,6 +560,20 @@
 .route-point-grid {
   font-family: var(--mono);
   color: var(--ink-soft);
+}
+
+.route-point-direction {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.route-point-direction span {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.route-point-direction input {
+  width: 100%;
 }
 
 .saved-routes-list {
