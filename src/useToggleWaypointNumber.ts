@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export function useToggleWaypointNumber(count: number) {
+export function useToggleWaypointNumber(_count: number) {
   const [hiddenIndexes, setHiddenIndexes] = useState<Set<number>>(new Set())
 
   function isHidden(index: number) {
@@ -19,9 +19,5 @@ export function useToggleWaypointNumber(count: number) {
     })
   }
 
-  function reset() {
-    setHiddenIndexes(new Set())
-  }
-
-  return { isHidden, toggle, reset }
+  return { isHidden, toggle }
 }
