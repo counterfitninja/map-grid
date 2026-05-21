@@ -1540,16 +1540,8 @@ function App() {
         }),
       }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
       marker.on('dblclick', (event) => {
-        event.originalEvent.preventDefault()
-        event.originalEvent.stopPropagation()
+        L.DomEvent.stopPropagation(event)
         toggleWaypointNumber(index)
-      })
-      marker.on('click', (event) => {
-        if (event.originalEvent.detail >= 2) {
-          event.originalEvent.preventDefault()
-          event.originalEvent.stopPropagation()
-          toggleWaypointNumber(index)
-        }
       })
       routeMarkerLayerRef.current.addLayer(marker)
     }
