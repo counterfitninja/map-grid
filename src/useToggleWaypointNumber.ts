@@ -19,5 +19,5 @@ export function useToggleWaypointNumber(_count: number) {
     })
   }
 
-  return { isHidden, toggle }
+  return { isHidden, toggle, hiddenIndexes }
 }

@@ -911,7 +911,7 @@ function App() {
   const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
   const [showRouteLine, setShowRouteLine] = useState(true)
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
-  const { isHidden: isWaypointNumberHidden, toggle: toggleWaypointNumber } = useToggleWaypointNumber(routeWaypoints.length)
+  const { isHidden: isWaypointNumberHidden, toggle: toggleWaypointNumber, hiddenIndexes: hiddenWaypointNumbers } = useToggleWaypointNumber(routeWaypoints.length)
   const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
   const [routePathStatus, setRoutePathStatus] = useState('')
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(() => loadSavedRoutes())
@@ -1571,7 +1571,7 @@ function App() {
         },
       ).addTo(map)
     }
-  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates, showRouteLine])
+  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates, showRouteLine, hiddenWaypointNumbers])
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
