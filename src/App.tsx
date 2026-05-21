@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+
 import L from 'leaflet'
 import './App.css'
+import { useToggleWaypointNumber } from './useToggleWaypointNumber'
 import {
   britishGridRef,
   britishGridToLatLng,
@@ -908,6 +910,7 @@ function App() {
   const [mapClickMode, setMapClickMode] = useState<'ping' | 'route'>('route')
   const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
   const [showRouteLine, setShowRouteLine] = useState(true)
+  const { isHidden: isWaypointNumberHidden, toggle: toggleWaypointNumber, reset: resetWaypointNumberHidden } = useToggleWaypointNumber(routeWaypoints.length)
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
   const [routePathStatus, setRoutePathStatus] = useState('')
@@ -1531,12 +1534,12 @@ function App() {
       const marker = L.marker([waypoint.lat, waypoint.lng], {
         icon: L.divIcon({
           className: 'map-route-point-icon',
-          html: showRouteLine ? `<span>${index + 1}</span>` : '<span></span>',
+          html: isWaypointNumberHidden(index) ? '<span></span>' : `<span>${index + 1}</span>`,
           iconSize: [24, 24],
           iconAnchor: [12, 12],
         }),
       }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
-
+      marker.on('dblclick', () => toggleWaypointNumber(index))
       routeMarkerLayerRef.current.addLayer(marker)
     }
 
