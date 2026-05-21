@@ -313,6 +313,24 @@ const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => 
   return earthRadiusMeters * c
 }
 
+const getCompassDirection = (from: L.LatLngLiteral, to: L.LatLngLiteral) => {
+  const lat1 = toRadians(from.lat)
+  const lat2 = toRadians(to.lat)
+  const dLng = toRadians(to.lng - from.lng)
+
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x =
+    Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI
+  const normalizedBearing = (bearing + 360) % 360
+
+  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const
+  const directionIndex = Math.round(normalizedBearing / 45) % directions.length
+
+  return directions[directionIndex]
+}
+
 class MinPriorityQueue<T> {
   private items: Array<{ item: T; priority: number }> = []
 
@@ -972,6 +990,19 @@ function App() {
         const to = waypoint
         return total + calculateDistanceMeters(from, to)
       }, 0),
+    [routeWaypoints],
+  )
+
+  const routeCardDirections = useMemo(
+    () =>
+      routeWaypoints.map((waypoint, index) => {
+        const nextWaypoint = routeWaypoints[index + 1]
+        if (!nextWaypoint) {
+          return 'Finish'
+        }
+
+        return getCompassDirection(waypoint, nextWaypoint)
+      }),
     [routeWaypoints],
   )
 
@@ -2551,6 +2582,7 @@ function App() {
                   <tr>
                     <th>Point</th>
                     <th>Grid ref</th>
+                    <th>Compass direction</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2558,6 +2590,7 @@ function App() {
                     <tr key={waypoint.id}>
                       <td>{index + 1}</td>
                       <td>{waypoint.gridReference}</td>
+                      <td>{routeCardDirections[index]}</td>
                     </tr>
                   ))}
                 </tbody>
