@@ -475,6 +475,10 @@
 }
 
 @media print {
+  .live-location-card {
+    display: none;
+  }
+
   .map-key {
     display: none;
   }
@@ -508,6 +512,37 @@
   box-shadow:
     0 0 0 2px rgba(12, 37, 31, 0.35),
     0 8px 14px rgba(12, 37, 31, 0.35);
+}
+
+.map-live-location-icon {
+  background: transparent;
+  border: 0;
+}
+
+.map-live-location-icon span {
+  display: block;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 3px solid #fff;
+  background: #2474e5;
+  box-shadow:
+    0 0 0 3px rgba(24, 76, 161, 0.76),
+    0 0 0 8px rgba(36, 116, 229, 0.2),
+    0 8px 16px rgba(12, 37, 31, 0.4);
+}
+
+.live-location-status--active {
+  color: #166246;
+  font-weight: 700;
+}
+
+.live-location-status--denied,
+.live-location-status--unavailable,
+.live-location-status--error,
+.live-location-status--stale {
+  color: #9d2c1c;
+  font-weight: 700;
 }
 
 .map-route-point-icon {

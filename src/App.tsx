@@ -28,6 +28,38 @@ type RouteWaypoint = {
 
 const routeCardDigits: GridDigits = 6
 
+type LiveLocationStatus =
+  | 'disabled'
+  | 'requesting'
+  | 'active'
+  | 'denied'
+  | 'unavailable'
+  | 'error'
+  | 'stale'
+
+type LiveLocationReading = {
+  latitude: number
+  longitude: number
+  accuracyMeters: number
+  timestamp: number
+  gridReference: string
+}
+
+const liveLocationAccuracyThresholdMeters = 100
+const liveLocationFreshnessMs = 60_000
+const liveLocationWatchOptions: PositionOptions = {
+  enableHighAccuracy: true,
+  maximumAge: 0,
+  timeout: 15_000,
+}
+
+const liveLocationIcon = L.divIcon({
+  className: 'map-live-location-icon',
+  html: '<span aria-hidden="true"></span>',
+  iconSize: [26, 26],
+  iconAnchor: [13, 13],
+})
+
 type ProwSegment = {
   coordinates: L.LatLngLiteral[]
 }
@@ -887,6 +919,10 @@ function App() {
     banes: [],
   })
   const pingMarkerRef = useRef<L.Marker | null>(null)
+  const liveLocationMarkerRef = useRef<L.Marker | null>(null)
+  const liveLocationWatchRef = useRef<number | null>(null)
+  const liveLocationReadingRef = useRef<LiveLocationReading | null>(null)
+  const liveLocationMountedRef = useRef(true)
   const routeLineRef = useRef<L.Polyline | null>(null)
   const routeMarkerLayerRef = useRef<L.LayerGroup | null>(null)
   const routeImportInputRef = useRef<HTMLInputElement | null>(null)
@@ -907,9 +943,15 @@ function App() {
   const [centerReference, setCenterReference] = useState('Loading grid reference...')
   const [pingLocation, setPingLocation] = useState<L.LatLngLiteral | null>(null)
   const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
+  const [liveLocationEnabled, setLiveLocationEnabled] = useState(false)
+  const [liveLocationStatus, setLiveLocationStatus] = useState<LiveLocationStatus>('disabled')
+  const [liveLocationReference, setLiveLocationReference] = useState('No live location yet.')
+  const [liveLocationUpdatedAt, setLiveLocationUpdatedAt] = useState<number | null>(null)
+  const [liveLocationHasReading, setLiveLocationHasReading] = useState(false)
   const [statusText, setStatusText] = useState('Initialising map...')
   const [printTitle, setPrintTitle] = useState(initialTitle)
   const [mapClickMode, setMapClickMode] = useState<'ping' | 'route'>('route')
+  const mapClickModeRef = useRef(mapClickMode)
   const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
   const [showRouteLine, setShowRouteLine] = useState(true)
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
@@ -966,6 +1008,10 @@ function App() {
   const [autoResolvedEndpoint, setAutoResolvedEndpoint] = useState<'wmts' | 'zxy'>('wmts')
   const [localProwNetworkVersion, setLocalProwNetworkVersion] = useState(0)
   const localProwEnabledRef = useRef(localProwEnabled)
+
+  useEffect(() => {
+    mapClickModeRef.current = mapClickMode
+  }, [mapClickMode])
 
   const totalRouteDistanceMeters = useMemo(
     () =>
@@ -1644,7 +1690,7 @@ function App() {
     }
 
     const handleMapClick = (event: L.LeafletMouseEvent) => {
-      if (mapClickMode === 'route') {
+      if (mapClickModeRef.current === 'route') {
         addRouteWaypoint(event.latlng)
         return
       }
@@ -1700,7 +1746,136 @@ function App() {
       map.remove()
       mapRef.current = null
     }
-  }, [mapClickMode])
+  }, [])
+
+  useEffect(() => {
+    liveLocationMountedRef.current = true
+
+    const clearLiveLocation = () => {
+      if (liveLocationWatchRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.clearWatch(liveLocationWatchRef.current)
+        liveLocationWatchRef.current = null
+      }
+      liveLocationMarkerRef.current?.remove()
+      liveLocationMarkerRef.current = null
+      liveLocationReadingRef.current = null
+      setLiveLocationReference('No live location yet.')
+      setLiveLocationUpdatedAt(null)
+      setLiveLocationHasReading(false)
+    }
+
+    if (!liveLocationEnabled) {
+      clearLiveLocation()
+      // The effect synchronizes the external geolocation subscription with the opt-in state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLiveLocationStatus('disabled')
+      return () => {
+        liveLocationMountedRef.current = false
+        clearLiveLocation()
+      }
+    }
+
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLiveLocationStatus('unavailable')
+      return () => {
+        liveLocationMountedRef.current = false
+        clearLiveLocation()
+      }
+    }
+
+    setLiveLocationStatus('requesting')
+
+    const handlePosition = (position: GeolocationPosition) => {
+      if (!liveLocationMountedRef.current || !liveLocationEnabled) {
+        return
+      }
+
+      const { latitude, longitude, accuracy } = position.coords
+      const timestamp = position.timestamp
+      const isValidCoordinates =
+        Number.isFinite(latitude) &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        Number.isFinite(longitude) &&
+        longitude >= -180 &&
+        longitude <= 180
+      const isValidAccuracy = Number.isFinite(accuracy) && accuracy >= 0
+      const previousReading = liveLocationReadingRef.current
+
+      if (
+        !isValidCoordinates ||
+        !isValidAccuracy ||
+        accuracy > liveLocationAccuracyThresholdMeters ||
+        !Number.isFinite(timestamp) ||
+        (previousReading !== null && timestamp <= previousReading.timestamp)
+      ) {
+        setLiveLocationStatus('requesting')
+        return
+      }
+
+      const latLng = L.latLng(latitude, longitude)
+      const gridReference = britishGridRef(
+        latLngToBritishGrid(latLng),
+        overlayStateRef.current.digits,
+      )
+      const reading: LiveLocationReading = {
+        latitude,
+        longitude,
+        accuracyMeters: accuracy,
+        timestamp,
+        gridReference,
+      }
+
+      liveLocationReadingRef.current = reading
+      setLiveLocationHasReading(true)
+      if (!liveLocationMarkerRef.current && mapRef.current) {
+        liveLocationMarkerRef.current = L.marker(latLng, {
+          icon: liveLocationIcon,
+          alt: 'Your live location',
+        }).addTo(mapRef.current)
+      } else {
+        liveLocationMarkerRef.current?.setLatLng(latLng)
+      }
+      liveLocationMarkerRef.current
+        ?.bindPopup(`<strong>Your live location</strong><br />${gridReference}`)
+      setLiveLocationReference(gridReference)
+      setLiveLocationUpdatedAt(timestamp)
+      setLiveLocationStatus('active')
+    }
+
+    const handlePositionError = (error: GeolocationPositionError) => {
+      if (!liveLocationMountedRef.current || !liveLocationEnabled) {
+        return
+      }
+
+      if (error.code === error.PERMISSION_DENIED) {
+        setLiveLocationStatus('denied')
+      } else if (error.code === error.POSITION_UNAVAILABLE) {
+        setLiveLocationStatus('unavailable')
+      } else {
+        setLiveLocationStatus('error')
+      }
+    }
+
+    liveLocationWatchRef.current = navigator.geolocation.watchPosition(
+      handlePosition,
+      handlePositionError,
+      liveLocationWatchOptions,
+    )
+
+    const freshnessTimer = window.setInterval(() => {
+      const reading = liveLocationReadingRef.current
+      if (reading && Date.now() - reading.timestamp >= liveLocationFreshnessMs) {
+        setLiveLocationStatus('stale')
+      }
+    }, 5_000)
+
+    return () => {
+      liveLocationMountedRef.current = false
+      window.clearInterval(freshnessTimer)
+      clearLiveLocation()
+    }
+  }, [liveLocationEnabled])
 
   const focusLocation = (coordinates: L.LatLngExpression) => {
     mapRef.current?.setView(coordinates, 15)
@@ -1934,6 +2109,44 @@ function App() {
         >
           Print route card only
         </button>
+
+        <div className="card live-location-card">
+          <label className="toggle-row" htmlFor="live-location-toggle">
+            <span>
+              Show my live location
+              <em className="layer-source">
+                Optional: asks your browser for permission and keeps the pin in this map session.
+              </em>
+            </span>
+            <input
+              id="live-location-toggle"
+              type="checkbox"
+              checked={liveLocationEnabled}
+              onChange={(event) => setLiveLocationEnabled(event.target.checked)}
+              aria-describedby="live-location-helper live-location-status"
+            />
+          </label>
+          <p id="live-location-helper" className="status">
+            The pin shows your device position on the map. It does not follow or save your location.
+          </p>
+          <p
+            id="live-location-status"
+            className={`status live-location-status live-location-status--${liveLocationStatus}`}
+            role="status"
+            aria-live="polite"
+          >
+            {liveLocationStatus === 'disabled' && 'Live location off'}
+            {liveLocationStatus === 'requesting' && 'Requesting location or waiting for an accurate position…'}
+            {liveLocationStatus === 'active' && `Live location active · updated ${liveLocationUpdatedAt ? new Date(liveLocationUpdatedAt).toLocaleTimeString('en-GB') : 'now'}`}
+            {liveLocationStatus === 'denied' && 'Location permission denied'}
+            {liveLocationStatus === 'unavailable' && 'Live location unavailable on this device'}
+            {liveLocationStatus === 'error' && 'Live location could not be updated'}
+            {liveLocationStatus === 'stale' && 'Live location is stale · waiting for an update'}
+          </p>
+          {liveLocationHasReading && (
+            <p className="grid-ref grid-ref--compact">Grid reference: {liveLocationReference}</p>
+          )}
+        </div>
 
         <div className="card">
           <label>
