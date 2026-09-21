@@ -57,8 +57,8 @@ function getGridLetters(easting: number, northing: number) {
     return '??'
   }
 
-  let first = (19 - n100k) - ((19 - n100k) % 5) + Math.floor((e100k + 10) / 5)
-  let second = ((19 - n100k) * 5) % 25 + (e100k % 5)
+  const first = (19 - n100k) - ((19 - n100k) % 5) + Math.floor((e100k + 10) / 5)
+  const second = ((19 - n100k) * 5) % 25 + (e100k % 5)
 
   return `${gridLetters[first]}${gridLetters[second]}`
 }

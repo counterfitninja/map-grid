@@ -370,6 +370,46 @@
   margin-bottom: 1rem;
 }
 
+.track-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.track-button {
+  min-height: 2.8rem;
+  padding: 0.65rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: #1d5547;
+  color: #fff8e8;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 0.4rem 1rem rgba(29, 85, 71, 0.2);
+}
+
+.track-button:hover,
+.track-button:focus-visible {
+  background: #143e34;
+}
+
+.track-route-toggle {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  min-height: 2.8rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(255, 252, 246, 0.78);
+  cursor: pointer;
+}
+
+.track-route-toggle span {
+  font-weight: 800;
+}
+
 .map-header h2 {
   font-size: clamp(1.7rem, 3vw, 2.7rem);
 }
@@ -730,6 +770,10 @@
     padding-top: 0;
   }
 
+  .map-stage {
+    order: -1;
+  }
+
   .panel {
     min-height: auto;
     max-height: none;
@@ -749,6 +793,46 @@
     width: 100%;
     aspect-ratio: 297 / 210;
     min-height: 60svh;
+  }
+
+  .shell--track-mode {
+    display: block;
+    min-height: 100svh;
+  }
+
+  .shell--track-mode .panel {
+    display: none;
+  }
+
+  .shell--track-mode .map-stage {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100svh;
+    min-height: 100svh;
+    padding: 0.75rem;
+  }
+
+  .shell--track-mode .map-header {
+    flex: 0 0 auto;
+    margin-bottom: 0.65rem;
+  }
+
+  .shell--track-mode .map-header > div:last-child,
+  .shell--track-mode .map-caption {
+    display: none;
+  }
+
+  .shell--track-mode .map-frame {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    aspect-ratio: auto;
+  }
+
+  .shell--track-mode .track-controls {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .route-card-overlay {

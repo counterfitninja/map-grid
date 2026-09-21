@@ -943,7 +943,7 @@ function App() {
   const [centerReference, setCenterReference] = useState('Loading grid reference...')
   const [pingLocation, setPingLocation] = useState<L.LatLngLiteral | null>(null)
   const [pingReference, setPingReference] = useState('No ping placed yet. Click the map.')
-  const [liveLocationEnabled, setLiveLocationEnabled] = useState(false)
+  const [trackMode, setTrackMode] = useState(false)
   const [liveLocationStatus, setLiveLocationStatus] = useState<LiveLocationStatus>('disabled')
   const [liveLocationReference, setLiveLocationReference] = useState('No live location yet.')
   const [liveLocationUpdatedAt, setLiveLocationUpdatedAt] = useState<number | null>(null)
@@ -954,6 +954,7 @@ function App() {
   const mapClickModeRef = useRef(mapClickMode)
   const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
   const [showRouteLine, setShowRouteLine] = useState(true)
+  const [routeOverlaysVisible, setRouteOverlaysVisible] = useState(false)
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const { isHidden: isWaypointNumberHidden, toggle: toggleWaypointNumber, hiddenIndexes: hiddenWaypointNumbers } = useToggleWaypointNumber(routeWaypoints.length)
   const [resolvedRouteCoordinates, setResolvedRouteCoordinates] = useState<L.LatLngLiteral[] | null>(null)
@@ -1578,40 +1579,42 @@ function App() {
       routeLineRef.current = null
     }
 
-    for (const [index, waypoint] of routeWaypoints.entries()) {
-      const marker = L.marker([waypoint.lat, waypoint.lng], {
-        icon: L.divIcon({
-          className: 'map-route-point-icon',
-          html: isWaypointNumberHidden(index) ? '<span></span>' : `<span>${index + 1}</span>`,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        }),
-      }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
-      marker.on('dblclick', (event) => {
-        L.DomEvent.stopPropagation(event)
-        toggleWaypointNumber(index)
-      })
-      routeMarkerLayerRef.current.addLayer(marker)
-    }
+    if (routeOverlaysVisible) {
+      for (const [index, waypoint] of routeWaypoints.entries()) {
+        const marker = L.marker([waypoint.lat, waypoint.lng], {
+          icon: L.divIcon({
+            className: 'map-route-point-icon',
+            html: isWaypointNumberHidden(index) ? '<span></span>' : `<span>${index + 1}</span>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+          }),
+        }).bindPopup(`<strong>Point ${index + 1}</strong><br />${waypoint.gridReference}`)
+        marker.on('dblclick', (event) => {
+          L.DomEvent.stopPropagation(event)
+          toggleWaypointNumber(index)
+        })
+        routeMarkerLayerRef.current.addLayer(marker)
+      }
+      
+      const lineCoordinates =
+        routePathMode === 'prow' && resolvedRouteCoordinates && resolvedRouteCoordinates.length >= 2
+          ? resolvedRouteCoordinates
+          : routeWaypoints
 
-    const lineCoordinates =
-      routePathMode === 'prow' && resolvedRouteCoordinates && resolvedRouteCoordinates.length >= 2
-        ? resolvedRouteCoordinates
-        : routeWaypoints
-
-    if (lineCoordinates.length >= 2 && showRouteLine) {
-      routeLineRef.current = L.polyline(
-        lineCoordinates.map((waypoint) => [waypoint.lat, waypoint.lng] as L.LatLngTuple),
-        {
-          color: '#0b6d53',
-          weight: 4,
-          opacity: 0.92,
-          dashArray: '9 6',
-          pane: 'overlayPane',
-        },
-      ).addTo(map)
+      if (lineCoordinates.length >= 2 && showRouteLine) {
+        routeLineRef.current = L.polyline(
+          lineCoordinates.map((waypoint) => [waypoint.lat, waypoint.lng] as L.LatLngTuple),
+          {
+            color: '#0b6d53',
+            weight: 4,
+            opacity: 0.92,
+            dashArray: '9 6',
+            pane: 'overlayPane',
+          },
+        ).addTo(map)
+      }
     }
-  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates, showRouteLine, hiddenWaypointNumbers])
+  }, [routeWaypoints, routePathMode, resolvedRouteCoordinates, showRouteLine, routeOverlaysVisible, hiddenWaypointNumbers])
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) {
@@ -1764,7 +1767,7 @@ function App() {
       setLiveLocationHasReading(false)
     }
 
-    if (!liveLocationEnabled) {
+    if (!trackMode) {
       clearLiveLocation()
       // The effect synchronizes the external geolocation subscription with the opt-in state.
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1786,7 +1789,7 @@ function App() {
     setLiveLocationStatus('requesting')
 
     const handlePosition = (position: GeolocationPosition) => {
-      if (!liveLocationMountedRef.current || !liveLocationEnabled) {
+      if (!liveLocationMountedRef.current || !trackMode) {
         return
       }
 
@@ -1844,7 +1847,7 @@ function App() {
     }
 
     const handlePositionError = (error: GeolocationPositionError) => {
-      if (!liveLocationMountedRef.current || !liveLocationEnabled) {
+      if (!liveLocationMountedRef.current || !trackMode) {
         return
       }
 
@@ -1875,7 +1878,30 @@ function App() {
       window.clearInterval(freshnessTimer)
       clearLiveLocation()
     }
-  }, [liveLocationEnabled])
+  }, [trackMode])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) {
+      return
+    }
+
+    const invalidateMapSize = () => {
+      window.requestAnimationFrame(() => map.invalidateSize())
+    }
+
+    invalidateMapSize()
+    window.addEventListener('resize', invalidateMapSize)
+
+    return () => window.removeEventListener('resize', invalidateMapSize)
+  }, [trackMode])
+
+  const enterTrackMode = () => setTrackMode(true)
+
+  const exitTrackMode = () => {
+    setTrackMode(false)
+    setRouteOverlaysVisible(false)
+  }
 
   const focusLocation = (coordinates: L.LatLngExpression) => {
     mapRef.current?.setView(coordinates, 15)
@@ -2087,7 +2113,7 @@ function App() {
   }
 
   return (
-    <div className={`shell${printMode === 'card' ? ' print-card-only' : ''}`}>
+    <div className={`shell${printMode === 'card' ? ' print-card-only' : ''}${trackMode ? ' shell--track-mode' : ''}`}>
       <aside className="panel no-print">
         <p className="eyebrow">Cubs Map Printer</p>
         <h1>OpenStreetMap with a UK grid overlay for printable route cards.</h1>
@@ -2113,21 +2139,21 @@ function App() {
         <div className="card live-location-card">
           <label className="toggle-row" htmlFor="live-location-toggle">
             <span>
-              Show my live location
+              Track mode
               <em className="layer-source">
-                Optional: asks your browser for permission and keeps the pin in this map session.
+                Opens a focused map and asks your browser for location permission.
               </em>
             </span>
             <input
               id="live-location-toggle"
               type="checkbox"
-              checked={liveLocationEnabled}
-              onChange={(event) => setLiveLocationEnabled(event.target.checked)}
+              checked={trackMode}
+              onChange={(event) => (event.target.checked ? enterTrackMode() : exitTrackMode())}
               aria-describedby="live-location-helper live-location-status"
             />
           </label>
           <p id="live-location-helper" className="status">
-            The pin shows your device position on the map. It does not follow or save your location.
+            Track mode shows your device position for this map session. It does not save or send your location.
           </p>
           <p
             id="live-location-status"
@@ -2753,6 +2779,28 @@ function App() {
 
       <main className="map-stage">
         <header className="map-header">
+          <div className="track-controls no-print">
+            {!trackMode ? (
+              <button type="button" className="track-button" onClick={enterTrackMode}>
+                Enter track mode
+              </button>
+            ) : (
+              <>
+                <button type="button" className="track-button" onClick={exitTrackMode}>
+                  Exit track mode
+                </button>
+                <label className="track-route-toggle" htmlFor="track-route-toggle">
+                  <span>Show route</span>
+                  <input
+                    id="track-route-toggle"
+                    type="checkbox"
+                    checked={routeOverlaysVisible}
+                    onChange={(event) => setRouteOverlaysVisible(event.target.checked)}
+                  />
+                </label>
+              </>
+            )}
+          </div>
           <div>
             <h2
               ref={titleRef}
