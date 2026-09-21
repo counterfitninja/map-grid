@@ -654,6 +654,24 @@
   width: 100%;
 }
 
+.route-measurement {
+  display: grid;
+  gap: 0.18rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid rgba(111, 98, 67, 0.18);
+}
+
+.route-measurement .status {
+  margin: 0;
+}
+
+.route-measurement__context {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--ink-soft);
+}
+
 .saved-routes-list {
   margin: 0;
   padding: 0;
@@ -717,6 +735,11 @@
   margin: 0.35rem 0 0;
   font-size: 0.72rem;
   color: var(--ink-soft);
+}
+
+.route-card-overlay__total {
+  font-weight: 700;
+  color: var(--ink-strong);
 }
 
 .route-card-overlay table {
@@ -929,6 +952,10 @@
 
   .route-card-overlay table {
     font-size: 0.6rem;
+  }
+
+  .route-measurement__context {
+    font-size: 0.58rem;
   }
 
   .shell.print-card-only .map-header,

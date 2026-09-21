@@ -347,6 +347,81 @@ const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => 
   return earthRadiusMeters * c
 }
 
+type RouteMeasurementStatus = 'not-ready' | 'ready' | 'unavailable'
+
+type RouteMeasurement = {
+  status: RouteMeasurementStatus
+  totalDistanceMeters: number | null
+  formattedDistance: string | null
+  scaleContext: string | null
+  statusMessage: string
+}
+
+const formatRouteDistance = (distanceMeters: number) => {
+  if (distanceMeters < 1000) {
+    return `${Math.round(distanceMeters)} m`
+  }
+
+  const distanceKilometres = distanceMeters / 1000
+  return `${distanceKilometres.toFixed(distanceKilometres < 10 ? 2 : 1)} km`
+}
+
+const createRouteMeasurement = (waypoints: RouteWaypoint[], gridSpacing: GridSpacing): RouteMeasurement => {
+  if (waypoints.length < 2) {
+    return {
+      status: 'not-ready',
+      totalDistanceMeters: null,
+      formattedDistance: null,
+      scaleContext: null,
+      statusMessage: 'Add at least two route pins to measure the route.',
+    }
+  }
+
+  if (
+    !Number.isFinite(gridSpacing) ||
+    gridSpacing <= 0 ||
+    waypoints.some(
+      (waypoint) =>
+        !Number.isFinite(waypoint.lat) ||
+        !Number.isFinite(waypoint.lng) ||
+        waypoint.lat < -90 ||
+        waypoint.lat > 90 ||
+        waypoint.lng < -180 ||
+        waypoint.lng > 180,
+    )
+  ) {
+    return {
+      status: 'unavailable',
+      totalDistanceMeters: null,
+      formattedDistance: null,
+      scaleContext: null,
+      statusMessage: 'Route measurement is unavailable for the current route data.',
+    }
+  }
+
+  const totalDistanceMeters = waypoints.slice(1).reduce((total, waypoint, index) => {
+    return total + calculateDistanceMeters(waypoints[index], waypoint)
+  }, 0)
+
+  if (!Number.isFinite(totalDistanceMeters) || totalDistanceMeters < 0) {
+    return {
+      status: 'unavailable',
+      totalDistanceMeters: null,
+      formattedDistance: null,
+      scaleContext: null,
+      statusMessage: 'Route measurement is unavailable for the current route data.',
+    }
+  }
+
+  return {
+    status: 'ready',
+    totalDistanceMeters,
+    formattedDistance: formatRouteDistance(totalDistanceMeters),
+    scaleContext: `Each grid square represents ${formatRouteDistance(gridSpacing)}; route length is calculated from the pins in order.`,
+    statusMessage: 'Measured from the route pins in order.',
+  }
+}
+
 class MinPriorityQueue<T> {
   private items: Array<{ item: T; priority: number }> = []
 
@@ -1014,14 +1089,9 @@ function App() {
     mapClickModeRef.current = mapClickMode
   }, [mapClickMode])
 
-  const totalRouteDistanceMeters = useMemo(
-    () =>
-      routeWaypoints.slice(1).reduce((total, waypoint, index) => {
-        const from = routeWaypoints[index]
-        const to = waypoint
-        return total + calculateDistanceMeters(from, to)
-      }, 0),
-    [routeWaypoints],
+  const routeMeasurement = useMemo(
+    () => createRouteMeasurement(routeWaypoints, activeSpacing),
+    [routeWaypoints, activeSpacing],
   )
 
   const activeProwSegments = useMemo(
@@ -2432,11 +2502,16 @@ function App() {
             </ol>
           )}
 
-          {routeWaypoints.length >= 2 && (
+          <div className="route-measurement" aria-live="polite" aria-label="Route measurement">
             <p className="status">
-              Route length: {(totalRouteDistanceMeters / 1000).toFixed(2)} km ({Math.round(totalRouteDistanceMeters)} m)
+              <strong>Route length</strong>{' '}
+              {routeMeasurement.status === 'ready' && routeMeasurement.formattedDistance}
+              {routeMeasurement.status !== 'ready' && routeMeasurement.statusMessage}
             </p>
-          )}
+            {routeMeasurement.status === 'ready' && routeMeasurement.scaleContext && (
+              <p className="route-measurement__context">{routeMeasurement.scaleContext}</p>
+            )}
+          </div>
         </div>
 
         <div className="card">
@@ -2850,9 +2925,9 @@ function App() {
                   ))}
                 </tbody>
               </table>
-              {routeWaypoints.length >= 2 && (
+              {routeMeasurement.status === 'ready' && routeMeasurement.formattedDistance && (
                 <p className="route-card-overlay__total">
-                  Total: {(totalRouteDistanceMeters / 1000).toFixed(2)} km
+                  Total: {routeMeasurement.formattedDistance}
                 </p>
               )}
             </aside>
