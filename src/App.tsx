@@ -357,7 +357,18 @@ type RouteMeasurement = {
   statusMessage: string
 }
 
-const formatRouteDistance = (distanceMeters: number) => {
+type DistanceUnit = 'metric' | 'imperial'
+
+const formatRouteDistance = (distanceMeters: number, unit: DistanceUnit) => {
+  if (unit === 'imperial') {
+    const distanceMiles = distanceMeters / 1609.344
+    if (distanceMiles < 0.1) {
+      return `${Math.round(distanceMeters * 3.28084)} ft`
+    }
+
+    return `${distanceMiles.toFixed(distanceMiles < 10 ? 2 : 1)} mi`
+  }
+
   if (distanceMeters < 1000) {
     return `${Math.round(distanceMeters)} m`
   }
@@ -366,7 +377,11 @@ const formatRouteDistance = (distanceMeters: number) => {
   return `${distanceKilometres.toFixed(distanceKilometres < 10 ? 2 : 1)} km`
 }
 
-const createRouteMeasurement = (waypoints: RouteWaypoint[], gridSpacing: GridSpacing): RouteMeasurement => {
+const createRouteMeasurement = (
+  waypoints: RouteWaypoint[],
+  gridSpacing: GridSpacing,
+  unit: DistanceUnit,
+): RouteMeasurement => {
   if (waypoints.length < 2) {
     return {
       status: 'not-ready',
@@ -416,8 +431,8 @@ const createRouteMeasurement = (waypoints: RouteWaypoint[], gridSpacing: GridSpa
   return {
     status: 'ready',
     totalDistanceMeters,
-    formattedDistance: formatRouteDistance(totalDistanceMeters),
-    scaleContext: `Each grid square represents ${formatRouteDistance(gridSpacing)}; route length is calculated from the pins in order.`,
+    formattedDistance: formatRouteDistance(totalDistanceMeters, unit),
+    scaleContext: `Each grid square represents ${formatRouteDistance(gridSpacing, unit)}; route length is calculated from the pins in order.`,
     statusMessage: 'Measured from the route pins in order.',
   }
 }
@@ -1029,6 +1044,7 @@ function App() {
   const mapClickModeRef = useRef(mapClickMode)
   const [routePathMode, setRoutePathMode] = useState<'straight' | 'prow'>('prow')
   const [showRouteLine, setShowRouteLine] = useState(true)
+  const [distanceUnit, setDistanceUnit] = useState<DistanceUnit>('metric')
   const [routeOverlaysVisible, setRouteOverlaysVisible] = useState(false)
   const [routeWaypoints, setRouteWaypoints] = useState<RouteWaypoint[]>([])
   const { isHidden: isWaypointNumberHidden, toggle: toggleWaypointNumber, hiddenIndexes: hiddenWaypointNumbers } = useToggleWaypointNumber(routeWaypoints.length)
@@ -1090,8 +1106,8 @@ function App() {
   }, [mapClickMode])
 
   const routeMeasurement = useMemo(
-    () => createRouteMeasurement(routeWaypoints, activeSpacing),
-    [routeWaypoints, activeSpacing],
+    () => createRouteMeasurement(routeWaypoints, activeSpacing, distanceUnit),
+    [routeWaypoints, activeSpacing, distanceUnit],
   )
 
   const activeProwSegments = useMemo(
@@ -2358,6 +2374,18 @@ function App() {
           </label>
 
           {routePathMode === 'prow' && <p className="status">{routePathStatus}</p>}
+
+          <label>
+            <span>Distance units</span>
+            <select
+              value={distanceUnit}
+              onChange={(event) => setDistanceUnit(event.target.value as DistanceUnit)}
+              aria-label="Distance units"
+            >
+              <option value="metric">Kilometres / metres</option>
+              <option value="imperial">Miles / feet</option>
+            </select>
+          </label>
 
           <label className="checkbox-label">
             <input
