@@ -2126,14 +2126,16 @@ function App() {
 
       liveLocationReadingRef.current = reading
       setLiveLocationHasReading(true)
-      if (!liveLocationMarkerRef.current && mapRef.current) {
+      const map = mapRef.current
+      if (!liveLocationMarkerRef.current && map) {
         liveLocationMarkerRef.current = L.marker(latLng, {
           icon: liveLocationIcon,
           alt: 'Your live location',
-        }).addTo(mapRef.current)
+        }).addTo(map)
       } else {
         liveLocationMarkerRef.current?.setLatLng(latLng)
       }
+      map?.panTo(latLng, { animate: false })
       liveLocationMarkerRef.current
         ?.bindPopup(`<strong>Your live location</strong><br />${gridReference}`)
       setLiveLocationReference(gridReference)
@@ -2509,7 +2511,7 @@ function App() {
             <span>
               Track mode
               <em className="layer-source">
-                Opens a focused map and asks your browser for location permission.
+                Centers the map on you and follows your position after permission is granted.
               </em>
             </span>
             <input
@@ -2521,7 +2523,7 @@ function App() {
             />
           </label>
           <p id="live-location-helper" className="status">
-            Track mode shows your device position for this map session. It does not save or send your location.
+            Track mode keeps your position centred on the map for this session. It does not save or send your location.
           </p>
           <p
             id="live-location-status"
