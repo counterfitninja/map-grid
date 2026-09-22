@@ -116,6 +116,106 @@
   color: #f8f5ea;
 }
 
+.map-image-card {
+  background: linear-gradient(145deg, rgba(255, 252, 246, 0.92), rgba(236, 245, 235, 0.76));
+  border-color: rgba(31, 77, 64, 0.2);
+}
+
+.card-heading-row,
+.range-label,
+.map-image-align-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.card-heading-row .status {
+  margin-top: 0.2rem;
+}
+
+.layer-badge {
+  flex-shrink: 0;
+  padding: 0.24rem 0.45rem;
+  border-radius: 999px;
+  color: #1d5547;
+  background: rgba(31, 77, 64, 0.1);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.map-image-name {
+  overflow: hidden;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.range-label output {
+  color: var(--ink-soft);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.map-image-align-row {
+  align-items: flex-end;
+}
+
+.map-image-align-row .status {
+  max-width: 12rem;
+}
+
+.nudge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1.7rem);
+  grid-template-rows: repeat(2, 1.7rem);
+  gap: 0.2rem;
+}
+
+.nudge-button {
+  grid-column: span 1;
+  border: 1px solid rgba(31, 77, 64, 0.2);
+  border-radius: 0.45rem;
+  color: var(--ink-strong);
+  background: rgba(31, 77, 64, 0.08);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
+
+.nudge-button:first-child {
+  grid-column: 2;
+}
+
+.nudge-button:hover,
+.nudge-button:focus-visible {
+  background: rgba(31, 77, 64, 0.18);
+}
+
+.nudge-button:disabled {
+  color: rgba(31, 77, 64, 0.42);
+  background: rgba(31, 77, 64, 0.04);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .meta-label {
   margin: 0;
   font-size: 0.6rem;
@@ -306,6 +406,17 @@
 .chip--secondary {
   justify-self: start;
   background: rgba(31, 77, 64, 0.1);
+}
+
+.chip--primary {
+  justify-self: start;
+  color: #f8f5ea;
+  background: #1d5547;
+}
+
+.chip--primary:hover,
+.chip--primary:focus-visible {
+  background: #286e5b;
 }
 
 .grid-ref--compact {

@@ -136,9 +136,24 @@ type SavedRoute = {
   waypoints: Array<Pick<RouteWaypoint, 'lat' | 'lng' | 'gridReference' | 'directionText'>>
 }
 
+type MapImageState = {
+  dataUrl: string
+  name: string
+  widthPx: number
+  heightPx: number
+  center: L.LatLngLiteral
+  baseWidthMeters: number
+  scalePercent: number
+  opacity: number
+  visible: boolean
+  asBase: boolean
+  locked: boolean
+}
+
 const defaultCenter: L.LatLngExpression = [51.229, -2.321]
 const osSettingsStorageKey = 'map-grid.os-settings.v1'
 const savedRoutesStorageKey = 'map-grid.saved-routes.v1'
+const mapImageStorageKey = 'map-grid.map-image.v1'
 const savedRoutesBackupVersion = 1
 const defaultOsZxyEndpoint = 'https://api.os.uk/maps/raster/v1/zxy/Outdoor_3857'
 const defaultOsWmtsEndpoint = 'https://api.os.uk/maps/raster/v1/wmts'
@@ -235,6 +250,41 @@ const loadSavedRoutes = (): SavedRoute[] => {
     return parsed.filter((entry): entry is SavedRoute => isSavedRoute(entry))
   } catch {
     return []
+  }
+}
+
+const isMapImageState = (entry: unknown): entry is MapImageState => {
+  if (!entry || typeof entry !== 'object') return false
+
+  const candidate = entry as Partial<MapImageState>
+  return (
+    typeof candidate.dataUrl === 'string' && candidate.dataUrl.startsWith('data:image/') &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.widthPx === 'number' && Number.isFinite(candidate.widthPx) && candidate.widthPx > 0 &&
+    typeof candidate.heightPx === 'number' && Number.isFinite(candidate.heightPx) && candidate.heightPx > 0 &&
+    candidate.center !== undefined && typeof candidate.center === 'object' &&
+    typeof (candidate.center as L.LatLngLiteral).lat === 'number' &&
+    Number.isFinite((candidate.center as L.LatLngLiteral).lat) &&
+    typeof (candidate.center as L.LatLngLiteral).lng === 'number' &&
+    Number.isFinite((candidate.center as L.LatLngLiteral).lng) &&
+    typeof candidate.baseWidthMeters === 'number' && Number.isFinite(candidate.baseWidthMeters) && candidate.baseWidthMeters > 0 &&
+    typeof candidate.scalePercent === 'number' && Number.isFinite(candidate.scalePercent) && candidate.scalePercent > 0 &&
+    typeof candidate.opacity === 'number' && Number.isFinite(candidate.opacity) && candidate.opacity >= 0 && candidate.opacity <= 1 &&
+    typeof candidate.visible === 'boolean' && typeof candidate.asBase === 'boolean' &&
+    (candidate.locked === undefined || typeof candidate.locked === 'boolean')
+  )
+}
+
+const loadMapImage = (): MapImageState | null => {
+  if (typeof window === 'undefined') return null
+
+  try {
+    const raw = window.localStorage.getItem(mapImageStorageKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return isMapImageState(parsed) ? { ...parsed, locked: parsed.locked === true } : null
+  } catch {
+    return null
   }
 }
 
@@ -345,6 +395,18 @@ const calculateDistanceMeters = (from: L.LatLngLiteral, to: L.LatLngLiteral) => 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 
   return earthRadiusMeters * c
+}
+
+const getMapImageBounds = (image: MapImageState) => {
+  const widthMeters = image.baseWidthMeters * (image.scalePercent / 100)
+  const heightMeters = widthMeters * (image.heightPx / image.widthPx)
+  const latitudeDelta = heightMeters / 111320
+  const longitudeDelta = widthMeters / (111320 * Math.max(Math.cos(toRadians(image.center.lat)), 0.1))
+
+  return L.latLngBounds(
+    [image.center.lat - latitudeDelta / 2, image.center.lng - longitudeDelta / 2],
+    [image.center.lat + latitudeDelta / 2, image.center.lng + longitudeDelta / 2],
+  )
 }
 
 type RouteMeasurementStatus = 'not-ready' | 'ready' | 'unavailable'
@@ -989,6 +1051,10 @@ function App() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<L.Map | null>(null)
   const overlayRef = useRef<BritishGridOverlay | null>(null)
+  const mapImageInputRef = useRef<HTMLInputElement | null>(null)
+  const mapImageOverlayRef = useRef<L.ImageOverlay | null>(null)
+  const mapImageDragCleanupRef = useRef<(() => void) | null>(null)
+  const mapImageRef = useRef<MapImageState | null>(null)
   const osmBaseLayerRef = useRef<L.TileLayer | null>(null)
   const communityTrailsLayerRef = useRef<L.TileLayer | null>(null)
   const officialProwLayerRef = useRef<L.TileLayer.WMS | null>(null)
@@ -1053,6 +1119,8 @@ function App() {
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>(() => loadSavedRoutes())
   const [routeNameInput, setRouteNameInput] = useState('')
   const [routeImportStatus, setRouteImportStatus] = useState('')
+  const [mapImage, setMapImage] = useState<MapImageState | null>(() => loadMapImage())
+  const [mapImageStatus, setMapImageStatus] = useState('')
   const [printMode, setPrintMode] = useState<'map' | 'card'>('map')
   const [communityTrailsEnabled, setCommunityTrailsEnabled] = useState(false)
   const [officialProwEnabled, setOfficialProwEnabled] = useState(false)
@@ -1100,6 +1168,10 @@ function App() {
   const [autoResolvedEndpoint, setAutoResolvedEndpoint] = useState<'wmts' | 'zxy'>('wmts')
   const [localProwNetworkVersion, setLocalProwNetworkVersion] = useState(0)
   const localProwEnabledRef = useRef(localProwEnabled)
+
+  useEffect(() => {
+    mapImageRef.current = mapImage
+  }, [mapImage])
 
   useEffect(() => {
     mapClickModeRef.current = mapClickMode
@@ -1213,6 +1285,20 @@ function App() {
   }, [savedRoutes])
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    try {
+      if (mapImage) {
+        window.localStorage.setItem(mapImageStorageKey, JSON.stringify(mapImage))
+      } else {
+        window.localStorage.removeItem(mapImageStorageKey)
+      }
+    } catch {
+      // Keep the image active for this session when browser storage is unavailable.
+    }
+  }, [mapImage])
+
+  useEffect(() => {
     const map = mapRef.current
     if (!map) return
 
@@ -1274,6 +1360,12 @@ function App() {
   useEffect(() => {
     const map = mapRef.current
     if (!map || !osmBaseLayerRef.current) return
+
+    if (mapImage?.asBase) {
+      if (map.hasLayer(osmBaseLayerRef.current)) map.removeLayer(osmBaseLayerRef.current)
+      if (osLayerRef.current && map.hasLayer(osLayerRef.current)) map.removeLayer(osLayerRef.current)
+      return
+    }
 
     if (baseMap === 'os' && activeOsApiKey.trim()) {
       const resolvedEndpoint = osEndpoint === 'auto' ? autoResolvedEndpoint : osEndpoint
@@ -1354,7 +1446,7 @@ function App() {
     if (!map.hasLayer(osmBaseLayerRef.current)) {
       osmBaseLayerRef.current.addTo(map)
     }
-  }, [baseMap, activeOsApiKey, osEndpoint, autoResolvedEndpoint, osZxyEndpoint, osWmtsEndpoint, osRasterLayer])
+  }, [baseMap, activeOsApiKey, osEndpoint, autoResolvedEndpoint, osZxyEndpoint, osWmtsEndpoint, osRasterLayer, mapImage?.asBase])
 
   useEffect(() => {
     if (baseMap === 'os' && !activeOsApiKey.trim()) {
@@ -1724,7 +1816,9 @@ function App() {
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     })
-    osmBaseLayerRef.current.addTo(map)
+    if (!mapImageRef.current?.asBase) {
+      osmBaseLayerRef.current.addTo(map)
+    }
 
     const overlay = new BritishGridOverlay()
     const initialSpacing =
@@ -1812,6 +1906,10 @@ function App() {
     return () => {
       map.off('click', handleMapClick)
       map.off('moveend zoomend', updateReference)
+      mapImageDragCleanupRef.current?.()
+      mapImageDragCleanupRef.current = null
+      mapImageOverlayRef.current?.remove()
+      mapImageOverlayRef.current = null
       pingMarkerRef.current?.remove()
       pingMarkerRef.current = null
       communityTrailsLayerRef.current?.remove()
@@ -1836,6 +1934,117 @@ function App() {
       mapRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!map.getPane('map-image-base-pane')) {
+      map.createPane('map-image-base-pane')
+    }
+    if (!map.getPane('map-image-overlay-pane')) {
+      map.createPane('map-image-overlay-pane')
+    }
+
+    const basePane = map.getPane('map-image-base-pane')
+    const overlayPane = map.getPane('map-image-overlay-pane')
+    if (basePane) basePane.style.zIndex = '210'
+    if (overlayPane) overlayPane.style.zIndex = '350'
+
+    if (!mapImage) {
+      mapImageDragCleanupRef.current?.()
+      mapImageDragCleanupRef.current = null
+      mapImageOverlayRef.current?.remove()
+      mapImageOverlayRef.current = null
+      return
+    }
+
+    const paneName = mapImage.asBase ? 'map-image-base-pane' : 'map-image-overlay-pane'
+    const currentOverlay = mapImageOverlayRef.current
+    const currentPane = currentOverlay?.options.pane
+    const needsNewOverlay = !currentOverlay || currentPane !== paneName
+
+    if (needsNewOverlay) {
+      mapImageDragCleanupRef.current?.()
+      mapImageDragCleanupRef.current = null
+      currentOverlay?.remove()
+
+      const nextOverlay = L.imageOverlay(mapImage.dataUrl, getMapImageBounds(mapImage), {
+        opacity: mapImage.opacity,
+        interactive: true,
+        pane: paneName,
+        alt: `Uploaded map image: ${mapImage.name}`,
+      }).addTo(map)
+      mapImageOverlayRef.current = nextOverlay
+
+      const imageElement = nextOverlay.getElement()
+      if (imageElement) {
+        imageElement.style.cursor = mapImage.locked ? 'default' : 'grab'
+        imageElement.style.pointerEvents = mapImage.locked ? 'none' : 'auto'
+        imageElement.style.touchAction = 'none'
+        imageElement.draggable = false
+
+        const handlePointerDown = (event: PointerEvent) => {
+          if (mapImageRef.current?.locked) return
+          event.preventDefault()
+          event.stopPropagation()
+          const startPointer = map.mouseEventToLatLng(event as unknown as MouseEvent)
+          const startCenter = mapImageRef.current?.center ?? mapImage.center
+          let dragging = true
+          map.dragging.disable()
+          imageElement.style.cursor = 'grabbing'
+
+          const handlePointerMove = (moveEvent: PointerEvent) => {
+            if (!dragging) return
+            if (mapImageRef.current?.locked) {
+              stopDragging()
+              return
+            }
+            const currentPointer = map.mouseEventToLatLng(moveEvent as unknown as MouseEvent)
+            const latitudeDelta = currentPointer.lat - startPointer.lat
+            const longitudeDelta = currentPointer.lng - startPointer.lng
+            setMapImage((current) =>
+              current
+                ? { ...current, center: { lat: startCenter.lat + latitudeDelta, lng: startCenter.lng + longitudeDelta } }
+                : current,
+            )
+          }
+
+          const stopDragging = () => {
+            if (!dragging) return
+            dragging = false
+            map.dragging.enable()
+            imageElement.style.cursor = mapImageRef.current?.locked ? 'default' : 'grab'
+            document.removeEventListener('pointermove', handlePointerMove)
+            document.removeEventListener('pointerup', stopDragging)
+            document.removeEventListener('pointercancel', stopDragging)
+          }
+
+          document.addEventListener('pointermove', handlePointerMove)
+          document.addEventListener('pointerup', stopDragging)
+          document.addEventListener('pointercancel', stopDragging)
+        }
+
+        imageElement.addEventListener('pointerdown', handlePointerDown)
+        mapImageDragCleanupRef.current = () => imageElement.removeEventListener('pointerdown', handlePointerDown)
+      }
+    } else {
+      currentOverlay.setBounds(getMapImageBounds(mapImage))
+      currentOverlay.setOpacity(mapImage.opacity)
+      const imageElement = currentOverlay.getElement()
+      if (imageElement) {
+        imageElement.style.cursor = mapImage.locked ? 'default' : 'grab'
+        imageElement.style.pointerEvents = mapImage.locked ? 'none' : 'auto'
+      }
+    }
+
+    const overlay = mapImageOverlayRef.current
+    if (overlay && mapImage.visible && !map.hasLayer(overlay)) {
+      overlay.addTo(map)
+    } else if (overlay && !mapImage.visible && map.hasLayer(overlay)) {
+      map.removeLayer(overlay)
+    }
+  }, [mapImage])
 
   useEffect(() => {
     liveLocationMountedRef.current = true
@@ -2134,6 +2343,79 @@ function App() {
     }
   }
 
+  const importMapImage = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!selectedFile) return
+    if (!selectedFile.type.startsWith('image/')) {
+      setMapImageStatus('Choose a PNG, JPEG, WebP, or other supported image file.')
+      return
+    }
+
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => (typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Invalid image')))
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read image'))
+        reader.readAsDataURL(selectedFile)
+      })
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const image = new Image()
+        image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+        image.onerror = () => reject(new Error('Could not decode image'))
+        image.src = dataUrl
+      })
+      const map = mapRef.current
+      const center = map?.getCenter() ?? L.latLng(51.505, -0.09)
+      const bounds = map?.getBounds()
+      const viewportWidthMeters = bounds && map ? map.distance(center, L.latLng(center.lat, bounds.getEast())) * 2 : 1_000
+      const baseWidthMeters = Math.max(100, Math.min(viewportWidthMeters * 0.8, 100_000))
+
+      setMapImage({
+        dataUrl,
+        name: selectedFile.name,
+        widthPx: dimensions.width,
+        heightPx: dimensions.height,
+        center: { lat: center.lat, lng: center.lng },
+        baseWidthMeters,
+        scalePercent: 100,
+        opacity: 0.55,
+        visible: true,
+        asBase: false,
+        locked: false,
+      })
+      setMapImageStatus(`Loaded ${selectedFile.name}. Drag the image to align it, then adjust size and opacity.`)
+    } catch {
+      setMapImageStatus('Could not read that image. Try a PNG, JPEG, or WebP file.')
+    }
+  }
+
+  const updateMapImage = (changes: Partial<MapImageState>) => {
+    setMapImage((current) => (current ? { ...current, ...changes } : current))
+  }
+
+  const nudgeMapImage = (direction: 'up' | 'down' | 'left' | 'right') => {
+    const map = mapRef.current
+    if (!mapImage || mapImage.locked || !map) return
+    const step = Math.max(1, mapImage.baseWidthMeters * (mapImage.scalePercent / 100) * 0.01)
+    const latitudeStep = step / 111320
+    const longitudeStep = step / (111320 * Math.max(Math.cos(toRadians(mapImage.center.lat)), 0.1))
+    const latitudeDirection = direction === 'up' ? 1 : direction === 'down' ? -1 : 0
+    const longitudeDirection = direction === 'right' ? 1 : direction === 'left' ? -1 : 0
+    updateMapImage({
+      center: {
+        lat: mapImage.center.lat + latitudeDirection * latitudeStep,
+        lng: mapImage.center.lng + longitudeDirection * longitudeStep,
+      },
+    })
+  }
+
+  const removeMapImage = () => {
+    setMapImage(null)
+    setMapImageStatus('Uploaded map removed.')
+  }
+
   const saveEditableTitle = () => {
     if (!titleRef.current) {
       return
@@ -2258,6 +2540,97 @@ function App() {
           {liveLocationHasReading && (
             <p className="grid-ref grid-ref--compact">Grid reference: {liveLocationReference}</p>
           )}
+        </div>
+
+        <div className="card map-image-card">
+          <input
+            ref={mapImageInputRef}
+            className="visually-hidden"
+            type="file"
+            accept="image/*"
+            onChange={importMapImage}
+          />
+          <div className="card-heading-row">
+            <div>
+              <p className="meta-label">Uploaded map</p>
+              <p className="status">Align a scanned map over the live map, then use it as your tracking base.</p>
+            </div>
+            <span className="layer-badge">{mapImage ? (mapImage.locked ? 'Locked' : 'Ready') : 'Optional'}</span>
+          </div>
+          <button type="button" className="chip chip--primary" onClick={() => mapImageInputRef.current?.click()}>
+            {mapImage ? 'Replace image' : 'Upload map image'}
+          </button>
+          {mapImage && (
+            <>
+              <p className="map-image-name" title={mapImage.name}>{mapImage.name}</p>
+              <label className="toggle-row" htmlFor="map-image-base-toggle">
+                <span>
+                  Use as base map
+                  <em className="layer-source">Hide OSM/OS tiles while keeping grid, routes, and tracking visible.</em>
+                </span>
+                <input
+                  id="map-image-base-toggle"
+                  type="checkbox"
+                  checked={mapImage.asBase}
+                  onChange={(event) => updateMapImage({ asBase: event.target.checked })}
+                />
+              </label>
+              <label className="toggle-row" htmlFor="map-image-visible-toggle">
+                <span>Show uploaded image</span>
+                <input
+                  id="map-image-visible-toggle"
+                  type="checkbox"
+                  checked={mapImage.visible}
+                  onChange={(event) => updateMapImage({ visible: event.target.checked })}
+                />
+              </label>
+              <label className="toggle-row" htmlFor="map-image-lock-toggle">
+                <span>
+                  Lock alignment
+                  <em className="layer-source">Stops dragging and nudging; the image stays anchored as you pan the base map.</em>
+                </span>
+                <input
+                  id="map-image-lock-toggle"
+                  type="checkbox"
+                  checked={mapImage.locked}
+                  onChange={(event) => updateMapImage({ locked: event.target.checked })}
+                />
+              </label>
+              <label>
+                <span className="range-label"><span>Opacity</span><output>{Math.round(mapImage.opacity * 100)}%</output></span>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1"
+                  step="0.05"
+                  value={mapImage.opacity}
+                  onChange={(event) => updateMapImage({ opacity: Number(event.target.value) })}
+                />
+              </label>
+              <label>
+                <span className="range-label"><span>Size</span><output>{mapImage.scalePercent}%</output></span>
+                <input
+                  type="range"
+                  min="25"
+                  max="300"
+                  step="1"
+                  value={mapImage.scalePercent}
+                  onChange={(event) => updateMapImage({ scalePercent: Number(event.target.value) })}
+                />
+              </label>
+              <div className="map-image-align-row">
+                <span className="status">{mapImage.locked ? 'Alignment locked · pan the map to inspect the overlay' : 'Drag the image on the map to align it'}</span>
+                <div className="nudge-grid" aria-label="Nudge uploaded map">
+                  <button type="button" className="nudge-button" onClick={() => nudgeMapImage('up')} aria-label="Move image up" disabled={mapImage.locked}>↑</button>
+                  <button type="button" className="nudge-button" onClick={() => nudgeMapImage('left')} aria-label="Move image left" disabled={mapImage.locked}>←</button>
+                  <button type="button" className="nudge-button" onClick={() => nudgeMapImage('down')} aria-label="Move image down" disabled={mapImage.locked}>↓</button>
+                  <button type="button" className="nudge-button" onClick={() => nudgeMapImage('right')} aria-label="Move image right" disabled={mapImage.locked}>→</button>
+                </div>
+              </div>
+              <button type="button" className="chip chip--secondary" onClick={removeMapImage}>Remove image</button>
+            </>
+          )}
+          {mapImageStatus && <p className="status" role="status" aria-live="polite">{mapImageStatus}</p>}
         </div>
 
         <div className="card">
@@ -2924,7 +3297,7 @@ function App() {
             </h2>
           </div>
           <p className="map-caption">
-            Tiles from {baseMap === 'os' ? 'Ordnance Survey' : 'OpenStreetMap'}, overlaid with the UK National Grid.
+            {mapImage?.asBase ? `Uploaded map base · ${mapImage.name}` : `Tiles from ${baseMap === 'os' ? 'Ordnance Survey' : 'OpenStreetMap'}`}, overlaid with the UK National Grid.
           </p>
         </header>
 

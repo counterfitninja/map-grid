@@ -8,6 +8,8 @@ Printable OpenStreetMap with a British National Grid overlay, built with Vite, R
 - Adjustable grid spacing
 - Centre-point grid reference readout
 - Click-to-drop ping with grid reference
+- Upload a scanned map image, drag it into alignment, adjust size/opacity, lock it in place, and use it as the tracking base
+- Uploaded map alignment persists in browser storage for the current browser profile
 - Print-friendly A4 landscape layout
 
 ## Local Development
